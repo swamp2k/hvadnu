@@ -28,10 +28,8 @@ describe('document analysis status endpoint', () => {
   });
 
   it('reports unavailable without exposing which runtime gate is missing', async () => {
-    const response = handleDocumentAnalysisStatusRequest(request(), {
-      ...readyEnv,
-      ANTHROPIC_API_KEY: undefined,
-    });
+    const { ANTHROPIC_API_KEY: _removed, ...envWithoutKey } = readyEnv;
+    const response = handleDocumentAnalysisStatusRequest(request(), envWithoutKey);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ available: false });
   });
