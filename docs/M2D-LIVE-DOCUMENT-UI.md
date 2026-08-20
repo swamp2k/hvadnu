@@ -15,21 +15,21 @@ Connect the already-deployed private app to the M2c analysis endpoint without we
 
 ## Production gates
 
-The repository now records these approved non-secret gates as `true` in `wrangler.jsonc`:
+The repository records these approved non-secret gates as `true` in `wrangler.jsonc`:
 
 - `DOCUMENT_ANALYSIS_ENABLED`
 - `PRIVATE_DEPLOYMENT_APPROVED`
 - `ANTHROPIC_ZDR_APPROVED`
 - `PAYLOAD_LOGGING_DISABLED`
 
-This does **not** make the endpoint available by itself. The Worker still requires both:
+The Worker also requires both runtime secrets:
 
 - `ANTHROPIC_API_KEY`
 - `ALLOWED_EMAIL`
 
-Neither belongs in Git. Configure them directly in Cloudflare runtime settings. `ALLOWED_EMAIL` may be stored as a secret as well even though it is not a credential; this keeps the case user's identity out of the public repository.
+They are declared in `wrangler.jsonc` as `secrets.required`. Current Wrangler validates required secrets during a real deploy, so production deployment fails closed if either is missing. Neither value belongs in Git.
 
-`keep_vars=true` remains enabled so dashboard/runtime-only bindings are preserved across GitHub-driven deploys.
+Store `ALLOWED_EMAIL` as a Cloudflare secret too even though it is not a credential; this keeps the case user's identity out of the public repository. Secrets are preserved across normal Wrangler deploys. `keep_vars=true` also remains enabled so other dashboard/runtime-only variables are not erased by GitHub-driven deploys.
 
 ## Status endpoint
 
@@ -53,12 +53,13 @@ The existing limits, ZDR decision, source-status protections, no-payload-logging
 
 ## First production activation
 
-After this milestone deploys:
+Before the first successful M2d production deploy:
 
-1. configure `ANTHROPIC_API_KEY` directly in Cloudflare;
-2. configure `ALLOWED_EMAIL` directly in Cloudflare;
-3. open the protected app as that Access user;
-4. confirm the document action becomes enabled;
-5. run one synthetic document end-to-end;
-6. inspect Cloudflare logs/observability for metadata only — no case text, prompts, or model response payloads;
-7. only then use real case material.
+1. configure `ANTHROPIC_API_KEY` directly in Cloudflare as a secret;
+2. configure `ALLOWED_EMAIL` directly in Cloudflare as a secret;
+3. merge/deploy M2d; Wrangler will reject the deployment if either required secret is absent;
+4. open the protected app as that Access user;
+5. confirm the document action becomes enabled;
+6. run one synthetic document end-to-end;
+7. inspect Cloudflare logs/observability for metadata only — no case text, prompts, or model response payloads;
+8. only then use real case material.
