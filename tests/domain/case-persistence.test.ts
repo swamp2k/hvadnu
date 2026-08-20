@@ -6,6 +6,7 @@ import {
   handleCaseImportDocumentRequest,
   handleCaseSnapshotRequest,
 } from '../../src/server/case-endpoint';
+import { chunksForDocument, SOURCE_CHUNK_MAX_CHARACTERS } from '../../src/storage/d1-case-repository';
 import type { D1Database, D1PreparedStatement, D1Result } from '../../src/storage/d1-types';
 
 class FakeStatement implements D1PreparedStatement {
@@ -37,7 +38,7 @@ const document: ExtractedDocument = {
   kind: 'text',
   sizeBytes: 120,
   pageCount: 1,
-  characterCount: 26,
+  characterCount: 27,
   pages: [{ pageNumber: 1, text: 'Synthetic source text only.' }],
   warnings: [],
 };
@@ -71,14 +72,35 @@ describe('M3b case persistence boundary', () => {
     expect(db.statements).toHaveLength(0);
   });
 
-  it('persists only explicit model analysis imports and uses a D1 batch', async () => {
+  it('persists only explicit model analysis imports and stores source text in bounded chunks', async () => {
     const db = new FakeDb();
     const response = await handleCaseImportDocumentRequest(post({ document, explanation }), db, 'allowed@example.invalid');
     expect(response.status).toBe(201);
     expect(db.batches).toHaveLength(1);
-    expect(db.batches[0]).toHaveLength(5);
+    expect(db.batches[0]).toHaveLength(6);
     const sourceInsert = db.batches[0]!.find((statement) => statement.query.includes('INSERT INTO case_sources'));
-    expect(sourceInsert?.values).toContain('Synthetic source text only.');
+    expect(sourceInsert?.values).not.toContain('Synthetic source text only.');
+    const chunkInsert = db.batches[0]!.find((statement) => statement.query.includes('INSERT INTO case_source_chunks'));
+    expect(chunkInsert?.values).toContain('Synthetic source text only.');
+  });
+
+  it('splits long source pages before D1 and preserves page numbers', () => {
+    const longDocument: ExtractedDocument = {
+      ...document,
+      kind: 'pdf',
+      pageCount: 2,
+      characterCount: SOURCE_CHUNK_MAX_CHARACTERS + 9,
+      pages: [
+        { pageNumber: 1, text: 'a'.repeat(SOURCE_CHUNK_MAX_CHARACTERS + 5) },
+        { pageNumber: 2, text: 'bbbb' },
+      ],
+    };
+    const chunks = chunksForDocument(longDocument);
+    expect(chunks).toHaveLength(3);
+    expect(chunks[0]?.text).toHaveLength(SOURCE_CHUNK_MAX_CHARACTERS);
+    expect(chunks[0]?.pageNumber).toBe(1);
+    expect(chunks[1]?.pageNumber).toBe(1);
+    expect(chunks[2]?.pageNumber).toBe(2);
   });
 
   it('refuses synthetic demo explanations so fixtures cannot be saved as production evidence', async () => {
