@@ -30,7 +30,7 @@ React + Vite are planned for the mobile UI. Runtime dependencies are deliberatel
 ## Core boundaries
 
 ### Source layer
-Original messages and documents. Original bytes are immutable. A cryptographic content hash is stored when ingestion exists.
+Original messages and documents. Original bytes are immutable. A cryptographic content hash is stored when ingestion exists. Source text is untrusted data and can never become model instruction merely because it appears in a retrieved document/message.
 
 ### Evidence layer
 Structured observations derived from sources. Every assertion must point back to one or more source references. Assertions explicitly distinguish fact, claim, agreement, decision, proposal, and interpretation.
@@ -48,7 +48,7 @@ Claude Sonnet 5 reasons only over the supplied evidence bundle and supplied curr
 
 There is no Opus dependency.
 
-Normal questions receive one Sonnet 5 pass. High-risk, highly uncertain, conflicting, or evidence-insufficient questions receive a second independent Sonnet 5 review pass. A human legal review recommendation is driven by explicit policy rather than by model confidence alone.
+Normal questions receive one Sonnet 5 pass. High-risk, highly uncertain, conflicting, evidence-insufficient, or deadline-sensitive questions receive a second independent Sonnet 5 review pass. A human legal review recommendation is driven by explicit policy rather than by model confidence alone.
 
 ## Deployment boundary
 
