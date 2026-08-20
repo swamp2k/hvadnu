@@ -30,15 +30,15 @@ describe('Worker Access context boundary', () => {
     expect(fallbackFetch).not.toHaveBeenCalled();
   });
 
-  it('accepts a legacy hostname Access session only after Access validates it', async () => {
-    const fallbackFetch = vi.fn(async (input: RequestInfo | URL) => {
+  it('accepts a legacy hostname Access assertion only after Access validates it', async () => {
+    const fallbackFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);
       expect(url).toBe('https://private.example.invalid/cdn-cgi/access/get-identity');
+      expect(new Headers(init?.headers).get('cookie')).toBe('CF_Authorization=synthetic-access-assertion');
       return Response.json({ email: 'legacy-user@example.invalid' });
     });
     const worker = createWorker(fallbackFetch);
     const response = await worker.fetch(statusRequest({
-      cookie: 'other=value; CF_Authorization=synthetic-session-token',
       'cf-access-jwt-assertion': 'synthetic-access-assertion',
     }), readyEnv, {});
 
@@ -56,12 +56,11 @@ describe('Worker Access context boundary', () => {
     expect(fallbackFetch).not.toHaveBeenCalled();
   });
 
-  it('fails closed when legacy Access rejects the current session', async () => {
+  it('fails closed when legacy Access rejects the current assertion', async () => {
     const fallbackFetch = vi.fn(async () => new Response('Unauthorized', { status: 401 }));
     const worker = createWorker(fallbackFetch);
     const response = await worker.fetch(statusRequest({
-      cookie: 'CF_Authorization=invalid-session-token',
-      'cf-access-jwt-assertion': 'synthetic-access-assertion',
+      'cf-access-jwt-assertion': 'invalid-access-assertion',
     }), readyEnv, {});
 
     expect(response.status).toBe(401);
@@ -72,7 +71,6 @@ describe('Worker Access context boundary', () => {
     const fallbackFetch = vi.fn();
     const worker = createWorker(fallbackFetch);
     const response = await worker.fetch(statusRequest({
-      cookie: 'CF_Authorization=synthetic-session-token',
       'cf-access-jwt-assertion': 'synthetic-access-assertion',
     }), readyEnv, {
       access: { getIdentity: async () => null },
