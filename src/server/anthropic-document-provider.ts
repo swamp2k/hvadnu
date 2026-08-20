@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
+import { toAiUsageMetadata } from '../ai/usage';
 import { DocumentExplanationPayloadSchema } from '../domain/document';
 import type { DocumentAnalysisProvider } from './document-analysis-service';
 
@@ -18,6 +19,8 @@ export function createAnthropicDocumentAnalysisProvider(apiKey: string): Documen
 
   return {
     async analyze({ model, prompt }) {
+      const contextCharacters = prompt.system.length + prompt.source.locators.reduce((sum, locator) => sum + locator.text.length, 0);
+      const startedAt = Date.now();
       const message = await client.messages.parse({
         model,
         max_tokens: 4096,
@@ -32,6 +35,7 @@ export function createAnthropicDocumentAnalysisProvider(apiKey: string): Documen
           },
         ],
         output_config: {
+          effort: 'medium',
           format: zodOutputFormat(DocumentExplanationPayloadSchema),
         },
       });
@@ -46,7 +50,16 @@ export function createAnthropicDocumentAnalysisProvider(apiKey: string): Documen
         throw new AnthropicDocumentAnalysisError('Claude returned no validated structured result.');
       }
 
-      return message.parsed_output;
+      return {
+        payload: message.parsed_output,
+        usage: toAiUsageMetadata({
+          taskType: 'document_analysis',
+          effort: 'medium',
+          usage: message.usage,
+          latencyMs: Date.now() - startedAt,
+          contextCharacters,
+        }),
+      };
     },
   };
 }
