@@ -20,16 +20,17 @@ The product is designed for a non-lawyer using only a phone. Its job is to reduc
 - Material answers require source provenance.
 - Insufficient evidence must produce uncertainty/abstention rather than invented certainty.
 - The system is allowed to tell the user that the user's own position is unsupported.
+- Retrieved source content is untrusted data, never model instruction.
 - No real case data is permitted in this public repository.
 
 ## Model strategy
 
-`claude-sonnet-5` is the only planned reasoning model in the initial architecture. Normal questions use one pass; policy-selected high-risk, uncertain, conflicting, or evidence-insufficient questions receive a separate Sonnet review pass. There is no Opus dependency.
+`claude-sonnet-5` is the only planned reasoning model in the initial architecture. Normal questions use one pass; policy-selected high-risk, uncertain, conflicting, deadline-sensitive, or evidence-insufficient questions receive a separate Sonnet review pass. There is no Opus dependency.
 
 ## Planned stack
 
 - TypeScript
-- React + Vite PWA
+- React + Vite
 - Cloudflare Worker + Hono
 - D1 with EU jurisdiction for structured case data
 - R2 with EU jurisdiction for private originals
@@ -37,13 +38,13 @@ The product is designed for a non-lawyer using only a phone. Its job is to reduc
 - Zod for structured contracts
 - Vitest + Playwright
 
-Milestone 0 intentionally installs only the dependencies needed to validate the domain/safety contracts. Runtime/UI infrastructure arrives with the milestone that uses it.
-
 ## Current status
 
-**Milestone 0 — Foundation**
+**Milestone 1 — Message assistant (synthetic demo)**
 
-No Cloudflare resources, Anthropic credentials, production deployment, or real case data exist yet.
+M1 adds the first real mobile UI and the production-shaped analysis result contract. It deliberately uses a deterministic synthetic engine: no text is sent to Claude, no input is stored, and real case data remains prohibited.
+
+Try the two built-in synthetic scenarios to validate the UX and safety behavior. Unknown messages return uncertainty instead of a fabricated answer.
 
 See:
 
@@ -52,13 +53,22 @@ See:
 - [`docs/SECURITY.md`](docs/SECURITY.md)
 - [`docs/AI-SAFETY.md`](docs/AI-SAFETY.md)
 - [`docs/EVALS.md`](docs/EVALS.md)
+- [`docs/M1-MESSAGE-ASSISTANT.md`](docs/M1-MESSAGE-ASSISTANT.md)
 - [`docs/MILESTONES.md`](docs/MILESTONES.md)
 
 ## Development
 
 ```bash
 npm install
+npm run dev
+```
+
+Validation:
+
+```bash
 npm run check
 ```
+
+`npm run check` runs TypeScript typechecking, Vitest, and a production Vite build.
 
 Only synthetic data may be used for local/CI development until the real-data security gate is explicitly cleared.
