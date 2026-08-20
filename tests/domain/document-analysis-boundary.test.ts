@@ -91,11 +91,11 @@ describe('document analysis boundary', () => {
     await expect(service.analyze(documentFixture)).rejects.toThrow();
   });
 
-  it('requires chunking before sending a very large extracted document', async () => {
+  it('derives the size guard from source text instead of trusting client metadata', async () => {
     const provider = validProvider();
     const largeDocument: ExtractedDocument = {
       ...documentFixture,
-      characterCount: MAX_SINGLE_DOCUMENT_ANALYSIS_CHARACTERS + 1,
+      characterCount: 1,
       pages: [{ pageNumber: 1, text: 'x'.repeat(MAX_SINGLE_DOCUMENT_ANALYSIS_CHARACTERS + 1) }],
     };
     const service = createDocumentAnalysisService(openGate, provider);
