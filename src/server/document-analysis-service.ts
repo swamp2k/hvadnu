@@ -75,6 +75,19 @@ export interface DocumentAnalysisService {
   analyze(document: ExtractedDocument): Promise<DocumentExplanation>;
 }
 
+function constrainSingleDocumentStatus(payload: z.infer<typeof DocumentExplanationPayloadSchema>) {
+  if (payload.sourceStatus !== 'current' && payload.sourceStatus !== 'superseded') return payload;
+
+  return {
+    ...payload,
+    sourceStatus: 'unknown' as const,
+    uncertainty: [
+      ...payload.uncertainty,
+      'Et enkelt dokument kan ikke alene fastslå, om det stadig er gældende eller senere er blevet erstattet.',
+    ],
+  };
+}
+
 export function createDocumentAnalysisService(
   gateInput: DocumentAnalysisGate,
   provider: DocumentAnalysisProvider,
@@ -99,7 +112,7 @@ export function createDocumentAnalysisService(
         prompt: buildDocumentAnalysisPrompt(document),
       });
 
-      const payload = DocumentExplanationPayloadSchema.parse(raw);
+      const payload = constrainSingleDocumentStatus(DocumentExplanationPayloadSchema.parse(raw));
       return DocumentExplanationSchema.parse({ mode: 'model_analysis', ...payload });
     },
   };
