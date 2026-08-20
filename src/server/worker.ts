@@ -22,14 +22,9 @@ function normalizedEmail(value: unknown): string | null {
   return email ? email : null;
 }
 
-function hasAccessSessionCookie(cookieHeader: string | null): boolean {
-  return Boolean(cookieHeader && /(?:^|;\s*)CF_Authorization=/u.test(cookieHeader));
-}
-
 async function getLegacyAccessEmail(request: Request, fetchImpl: FetchLike): Promise<string | null> {
-  const assertion = request.headers.get('cf-access-jwt-assertion');
-  const cookie = request.headers.get('cookie');
-  if (!assertion || !hasAccessSessionCookie(cookie)) return null;
+  const assertion = request.headers.get('cf-access-jwt-assertion')?.trim();
+  if (!assertion) return null;
 
   const identityUrl = new URL(request.url);
   identityUrl.pathname = '/cdn-cgi/access/get-identity';
@@ -41,7 +36,7 @@ async function getLegacyAccessEmail(request: Request, fetchImpl: FetchLike): Pro
       method: 'GET',
       headers: {
         accept: 'application/json',
-        cookie: cookie!,
+        cookie: `CF_Authorization=${assertion}`,
       },
       cache: 'no-store',
       redirect: 'manual',
@@ -71,8 +66,8 @@ export async function resolveAccessEmail(
   }
 
   // Compatibility path for hostname/self-hosted Access applications created before
-  // Worker-native ctx.access. Access itself validates the CF_Authorization session at
-  // the reserved /cdn-cgi/access/get-identity endpoint on this same protected host.
+  // Worker-native ctx.access. Access itself validates the application token at the
+  // reserved /cdn-cgi/access/get-identity endpoint on this same protected host.
   return getLegacyAccessEmail(request, fetchImpl);
 }
 
