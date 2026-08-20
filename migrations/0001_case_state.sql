@@ -17,13 +17,24 @@ CREATE TABLE IF NOT EXISTS case_sources (
   document_kind TEXT,
   size_bytes INTEGER,
   character_count INTEGER,
-  source_text TEXT,
   analysis_json TEXT,
   created_at TEXT NOT NULL,
   UNIQUE (case_id, id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_case_sources_case_id ON case_sources(case_id);
+
+CREATE TABLE IF NOT EXISTS case_source_chunks (
+  case_id TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  chunk_index INTEGER NOT NULL CHECK (chunk_index >= 0),
+  page_number INTEGER CHECK (page_number IS NULL OR page_number > 0),
+  text TEXT NOT NULL CHECK (length(text) > 0),
+  PRIMARY KEY (case_id, source_id, chunk_index),
+  FOREIGN KEY (case_id, source_id) REFERENCES case_sources(case_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_case_source_chunks_source ON case_source_chunks(case_id, source_id, chunk_index);
 
 CREATE TABLE IF NOT EXISTS case_timeline_events (
   id TEXT PRIMARY KEY,
