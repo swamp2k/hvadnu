@@ -1,5 +1,11 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import {
+  handleCaseDeleteRequest,
+  handleCaseExportRequest,
+  handleCaseImportDocumentRequest,
+  handleCaseSnapshotRequest,
+} from './case-endpoint';
+import {
   handleDocumentAnalysisRequest,
   handleDocumentAnalysisStatusRequest,
   type WorkerEnv,
@@ -76,9 +82,6 @@ export async function resolveAccessEmail(
   const assertion = request.headers.get('cf-access-jwt-assertion')?.trim();
   if (!assertion) return null;
 
-  // Compatibility path for existing/self-hosted Access applications. Cloudflare's
-  // application token is verified cryptographically against the account signing keys,
-  // issuer and this application's audience before the request is trusted.
   return verifyJwt(assertion, env);
 }
 
@@ -108,6 +111,38 @@ export function createWorker(verifyJwt: AccessJwtVerifier = verifyClassicAccessJ
         return handleDocumentAnalysisRequest(
           request,
           env,
+          await resolveAccessEmail(request, env, ctx, verifyJwt),
+        );
+      }
+
+      if (url.pathname === '/api/case') {
+        return handleCaseSnapshotRequest(
+          request,
+          env.DB,
+          await resolveAccessEmail(request, env, ctx, verifyJwt),
+        );
+      }
+
+      if (url.pathname === '/api/case/import-document') {
+        return handleCaseImportDocumentRequest(
+          request,
+          env.DB,
+          await resolveAccessEmail(request, env, ctx, verifyJwt),
+        );
+      }
+
+      if (url.pathname === '/api/case/export') {
+        return handleCaseExportRequest(
+          request,
+          env.DB,
+          await resolveAccessEmail(request, env, ctx, verifyJwt),
+        );
+      }
+
+      if (url.pathname === '/api/case/delete') {
+        return handleCaseDeleteRequest(
+          request,
+          env.DB,
           await resolveAccessEmail(request, env, ctx, verifyJwt),
         );
       }
