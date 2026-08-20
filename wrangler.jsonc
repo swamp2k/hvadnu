@@ -19,5 +19,8 @@
     "PRIVATE_DEPLOYMENT_APPROVED": "true",
     "ANTHROPIC_ZDR_APPROVED": "true",
     "PAYLOAD_LOGGING_DISABLED": "true"
+  },
+  "secrets": {
+    "required": ["ANTHROPIC_API_KEY", "ALLOWED_EMAIL"]
   }
 }
