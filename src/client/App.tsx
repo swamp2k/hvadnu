@@ -2,6 +2,7 @@ import { useMemo, useState, type FormEvent } from 'react';
 import { analyzeDemoMessage } from '../demo/analyze-demo-message';
 import { DEMO_MESSAGES, DEMO_SOURCES } from '../demo/synthetic-case';
 import type { MessageAnalysisResult } from '../domain/message-result';
+import { DocumentsView } from './DocumentsView';
 
 const levelMeta = {
   supported: { label: 'Understøttet', className: 'status-supported' },
@@ -55,9 +56,7 @@ function ResultView({ result }: { result: MessageAnalysisResult }) {
         <span className={`status-pill ${meta.className}`}>{meta.label}</span>
       </div>
 
-      <article className="card summary-card">
-        <p>{result.summary}</p>
-      </article>
+      <article className="card summary-card"><p>{result.summary}</p></article>
 
       <div className="two-up">
         <article className="card">
@@ -72,10 +71,7 @@ function ResultView({ result }: { result: MessageAnalysisResult }) {
 
       {result.caseContext.length > 0 && (
         <article className="card">
-          <div className="section-title-row">
-            <h3>Hvad ved sagen?</h3>
-            <span className="source-count">{result.caseContext.length} fund</span>
-          </div>
+          <div className="section-title-row"><h3>Hvad ved sagen?</h3><span className="source-count">{result.caseContext.length} fund</span></div>
           <div className="context-list">
             {result.caseContext.map((item) => (
               <div className="context-item" key={item.text}>
@@ -88,10 +84,7 @@ function ResultView({ result }: { result: MessageAnalysisResult }) {
       )}
 
       <article className="card assessment-card">
-        <div className="section-title-row">
-          <h3>Juridisk vurdering</h3>
-          <span className={`status-dot ${meta.className}`} aria-hidden="true" />
-        </div>
+        <div className="section-title-row"><h3>Juridisk vurdering</h3><span className={`status-dot ${meta.className}`} aria-hidden="true" /></div>
         <strong>{result.legalAssessment.title}</strong>
         <p>{result.legalAssessment.explanation}</p>
         <SourceLinks sourceIds={result.legalAssessment.sourceIds} />
@@ -104,10 +97,7 @@ function ResultView({ result }: { result: MessageAnalysisResult }) {
       </article>
 
       <article className="card reply-card">
-        <div className="section-title-row">
-          <h3>Forslag til svar</h3>
-          <button className="text-button" type="button" onClick={copyReply}>{copied ? 'Kopieret' : 'Kopiér'}</button>
-        </div>
+        <div className="section-title-row"><h3>Forslag til svar</h3><button className="text-button" type="button" onClick={copyReply}>{copied ? 'Kopieret' : 'Kopiér'}</button></div>
         <blockquote>{result.suggestedReply}</blockquote>
       </article>
 
@@ -144,8 +134,8 @@ function ResultView({ result }: { result: MessageAnalysisResult }) {
   );
 }
 
-export function App() {
-  const [message, setMessage] = useState(DEMO_MESSAGES.changedPickup);
+function MessageAssistantView() {
+  const [message, setMessage] = useState<string>(DEMO_MESSAGES.changedPickup);
   const [result, setResult] = useState<MessageAnalysisResult | null>(null);
   const trimmed = useMemo(() => message.trim(), [message]);
 
@@ -161,21 +151,7 @@ export function App() {
   }
 
   return (
-    <main className="app-shell">
-      <header className="topbar">
-        <div className="brand-mark">?</div>
-        <div>
-          <p className="eyebrow">Hvad nu?</p>
-          <h1>Beskedhjælp</h1>
-        </div>
-        <span className="demo-badge">DEMO</span>
-      </header>
-
-      <section className="demo-notice" role="note">
-        <strong>Syntetisk testtilstand</strong>
-        <span>Ingen tekst sendes til Claude eller gemmes. Brug ikke rigtige sagsdata her.</span>
-      </section>
-
+    <>
       <section className="intro">
         <h2>Hvad har du fået?</h2>
         <p>Indsæt beskeden. Hvad nu? skiller det konkrete fra støjen og viser, hvad sagen faktisk understøtter.</p>
@@ -207,10 +183,37 @@ export function App() {
           <p>Du får: hvad der kræver svar, hvad der kan ignoreres, sagskontekst, juridisk usikkerhed og et neutralt svarforslag.</p>
         </section>
       )}
+    </>
+  );
+}
 
-      <footer>
-        M1 · syntetisk demo · ingen produktion eller rigtige sagsdata
-      </footer>
+export function App() {
+  const [activeArea, setActiveArea] = useState<'message' | 'documents'>('message');
+
+  return (
+    <main className="app-shell">
+      <header className="topbar">
+        <div className="brand-mark">?</div>
+        <div>
+          <p className="eyebrow">Hvad nu?</p>
+          <h1>{activeArea === 'message' ? 'Beskedhjælp' : 'Dokumenter'}</h1>
+        </div>
+        <span className="demo-badge">M2 PREVIEW</span>
+      </header>
+
+      <section className="demo-notice" role="note">
+        <strong>Sikker preview-tilstand</strong>
+        <span>Beskedanalysen er syntetisk. Dokumenter parses lokalt i browseren og sendes ikke til Claude eller storage. Brug stadig ikke rigtige sagsdata i en offentlig preview-host.</span>
+      </section>
+
+      <nav className="area-tabs" aria-label="Hovedområder">
+        <button className={activeArea === 'message' ? 'active' : ''} type="button" onClick={() => setActiveArea('message')}>Besked</button>
+        <button className={activeArea === 'documents' ? 'active' : ''} type="button" onClick={() => setActiveArea('documents')}>Dokument</button>
+      </nav>
+
+      {activeArea === 'message' ? <MessageAssistantView /> : <DocumentsView />}
+
+      <footer>M2a · syntetisk analyse + lokal dokument-extraction · ingen produktion eller persistence</footer>
     </main>
   );
 }
