@@ -1,59 +1,37 @@
 import { describe, expect, it } from 'vitest';
-import {
-  buildSafeLegalResearchBrief,
-  extractWebResearchSources,
-  isOfficialLegalDomain,
-} from '../../src/server/anthropic-web-research-provider';
+import { extractWebSources, isOfficialDanishDomain } from '../../src/server/web-source-extraction';
 
-describe('legal web research source normalization', () => {
-  it('builds web-search input only from fixed legal topic labels, never raw private details', () => {
-    const brief = buildSafeLegalResearchBrief(
-      'Syntetisk Person skriver i sag BS-12345/2099/XYZ at samværet skal stoppes. Ring 11 22 33 44.',
-    );
-    expect(brief).toContain('samvær');
-    expect(brief).not.toContain('Syntetisk Person');
-    expect(brief).not.toContain('BS-12345');
-    expect(brief).not.toContain('11 22 33 44');
-    expect(brief).not.toContain('skal stoppes');
+describe('web source extraction', () => {
+  it('classifies official Danish domains without trusting lookalikes', () => {
+    expect(isOfficialDanishDomain('https://www.domstol.dk/hoejesteret/aktuelt/2099/')).toBe(true);
+    expect(isOfficialDanishDomain('https://www.retsinformation.dk/eli/lta/2099/123')).toBe(true);
+    expect(isOfficialDanishDomain('https://domstol.dk.evil.example/decision')).toBe(false);
+    expect(isOfficialDanishDomain('https://example.invalid/legal')).toBe(false);
   });
 
-  it('maps property disputes to generic family-property research without leaking wording', () => {
-    const brief = buildSafeLegalResearchBrief('Syntetisk Part mener huset er 2.900.000 værd og kræver bestemt indbo.');
-    expect(brief).toContain('bodeling');
-    expect(brief).not.toContain('Syntetisk Part');
-    expect(brief).not.toContain('2.900.000');
-  });
-
-  it('classifies official Danish legal domains without trusting lookalikes', () => {
-    expect(isOfficialLegalDomain('https://www.domstol.dk/hoejesteret/aktuelt/2026/')).toBe(true);
-    expect(isOfficialLegalDomain('https://www.retsinformation.dk/eli/lta/2026/662')).toBe(true);
-    expect(isOfficialLegalDomain('https://domstol.dk.evil.example/decision')).toBe(false);
-    expect(isOfficialLegalDomain('https://example.invalid/legal')).toBe(false);
-  });
-
-  it('keeps only concrete cited web snippets and deduplicates URLs', () => {
-    const sources = extractWebResearchSources([
+  it('keeps concrete cited web snippets and deduplicates URLs', () => {
+    const sources = extractWebSources([
       {
         type: 'text',
         text: 'Synthetic research note',
         citations: [
           {
             type: 'web_search_result_location',
-            url: 'https://www.domstol.dk/media/example/anonym.pdf',
-            title: 'Højesterets afgørelse',
-            cited_text: 'Retten lagde vægt på barnets bedste.',
+            url: 'https://www.domstol.dk/media/synthetic/anonym.pdf',
+            title: 'Syntetisk afgørelse',
+            cited_text: 'Dette er et syntetisk citeret uddrag.',
           },
           {
             type: 'web_search_result_location',
-            url: 'https://www.domstol.dk/media/example/anonym.pdf',
-            title: 'Højesterets afgørelse',
-            cited_text: 'Afgørelsen beroede på en konkret vurdering.',
+            url: 'https://www.domstol.dk/media/synthetic/anonym.pdf',
+            title: 'Syntetisk afgørelse',
+            cited_text: 'Dette er endnu et syntetisk uddrag.',
           },
           {
             type: 'web_search_result_location',
-            url: 'https://law-blog.example/article',
-            title: 'Kommentar',
-            cited_text: 'Dette er sekundær juridisk kommentar.',
+            url: 'https://example.invalid/article',
+            title: 'Syntetisk kommentar',
+            cited_text: 'Dette er sekundært syntetisk materiale.',
           },
         ],
       },
@@ -64,14 +42,14 @@ describe('legal web research source normalization', () => {
       sourceId: 'web:1',
       sourceType: 'web_official',
       status: 'unknown',
-      locator: 'https://www.domstol.dk/media/example/anonym.pdf',
+      locator: 'https://www.domstol.dk/media/synthetic/anonym.pdf',
     });
-    expect(sources[0]?.text).toContain('konkret vurdering');
+    expect(sources[0]?.text).toContain('endnu et syntetisk uddrag');
     expect(sources[1]?.sourceType).toBe('web_secondary');
   });
 
   it('ignores uncited prose and non-http citation targets', () => {
-    expect(extractWebResearchSources([
+    expect(extractWebSources([
       { type: 'text', text: 'No citations', citations: null },
       {
         type: 'text',

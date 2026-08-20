@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import type { CaseQueryResult } from '../domain/case-query';
 import type { CaseSnapshot } from '../domain/case-state';
 import type { CurrentStateEntry } from '../domain/current-state';
-import { CaseApiError, deleteCase, exportCase, getCaseSnapshot } from './case-api';
+import { CaseApiError, deleteCase, exportCase, getCaseSnapshot, queryCase } from './case-api';
 import './current-case.css';
 
 const stateLabel: Record<CurrentStateEntry['status'], string> = {
@@ -44,6 +45,10 @@ export function CurrentCaseView() {
   const [loading, setLoading] = useState(true);
   const [showSuperseded, setShowSuperseded] = useState(false);
   const [maintenanceWorking, setMaintenanceWorking] = useState(false);
+  const [question, setQuestion] = useState('');
+  const [queryResult, setQueryResult] = useState<CaseQueryResult | null>(null);
+  const [queryWorking, setQueryWorking] = useState(false);
+  const [queryError, setQueryError] = useState<string | null>(null);
 
   async function refresh() {
     setLoading(true);
@@ -90,12 +95,72 @@ export function CurrentCaseView() {
     try { await deleteCase(); await refresh(); } catch (cause) { setError(caseErrorMessage(cause)); } finally { setMaintenanceWorking(false); }
   }
 
+  async function handleQuery(event: FormEvent) {
+    event.preventDefault();
+    const cleanQuestion = question.trim();
+    if (!cleanQuestion || queryWorking) return;
+    setQueryWorking(true);
+    setQueryError(null);
+    try {
+      setQueryResult(await queryCase(cleanQuestion));
+    } catch (cause) {
+      setQueryResult(null);
+      setQueryError(caseErrorMessage(cause));
+    } finally {
+      setQueryWorking(false);
+    }
+  }
+
   return (
     <>
       <section className="intro">
         <h2>Hvad gælder lige nu?</h2>
         <p>Her samles de aftaler og afgørelser, som er bekræftet i sagen. Dokumenter og beskeder bliver ikke automatisk gjort gældende.</p>
       </section>
+
+      <form className="case-query card" onSubmit={(event) => { void handleQuery(event); }}>
+        <div>
+          <strong>Spørg til sagen</strong>
+          <p className="muted compact">AI søger i dine gemte beskeder og dokumenter. Hvis sagen ikke indeholder svaret, får du tydeligt besked og et generelt websvar i stedet.</p>
+        </div>
+        <textarea
+          value={question}
+          onChange={(event) => { setQuestion(event.target.value); setQueryResult(null); }}
+          placeholder="Fx: Hvad står der om vurderingen af huset?"
+          rows={2}
+          disabled={queryWorking}
+        />
+        <button className="primary-button" type="submit" disabled={!question.trim() || queryWorking}>{queryWorking ? 'Søger …' : 'Spørg AI'}</button>
+      </form>
+
+      {queryError && <section className="card error-card" role="alert"><strong>Kunne ikke svare</strong><p>{queryError}</p></section>}
+      {queryResult && (
+        <section className="card case-query-result" aria-live="polite">
+          <div className="section-title-row">
+            <strong>Svar</strong>
+            <span className={`case-query-badge ${queryResult.caseEvidenceFound ? 'case-query-badge-case' : 'case-query-badge-web'}`}>
+              {queryResult.caseEvidenceFound ? 'Fra sagen' : 'Websvar'}
+            </span>
+          </div>
+          <p className="case-query-answer">{queryResult.answer}</p>
+          {queryResult.sources.length > 0 && (
+            <details className="case-query-sources">
+              <summary>Kilder ({queryResult.sources.length})</summary>
+              <div className="source-detail-list">
+                {queryResult.sources.map((source, index) => {
+                  const url = source.locator?.startsWith('https://') || source.locator?.startsWith('http://') ? source.locator : null;
+                  return (
+                    <div key={`${source.kind}-${source.label}-${index}`}>
+                      <strong>{source.label}</strong>
+                      {url ? <p><a href={url} target="_blank" rel="noreferrer">Åbn kilde</a></p> : source.locator ? <p className="muted">{source.locator}</p> : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </details>
+          )}
+        </section>
+      )}
 
       <section className="case-maintenance card">
         <div className="section-title-row">

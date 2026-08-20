@@ -5,8 +5,6 @@ import type { D1Database } from './d1-types';
 const MAX_CONTEXT_CHARACTERS = 12_000;
 const MAX_RELEVANT_CHUNKS = 12;
 const FALLBACK_RECENT_CHUNKS = 6;
-const MAX_LEGAL_CONTEXT_CHARACTERS = 7_000;
-const MAX_LEGAL_REFERENCES = 6;
 const MAX_HISTORY_ENTRIES = 50;
 const STOP_WORDS = new Set([
   'den', 'det', 'der', 'som', 'for', 'fra', 'med', 'til', 'har', 'kan', 'skal', 'vil', 'jeg', 'mig', 'min', 'mit', 'mine',
@@ -34,18 +32,6 @@ interface ContextRow {
   text: string;
 }
 
-interface LegalContextRow {
-  reference_id: string;
-  title: string;
-  authority: string;
-  source_url: string;
-  locator: string;
-  source_type: 'law' | 'official_guidance' | 'court_guidance';
-  content_kind: 'curated_summary' | 'verbatim_excerpt';
-  version_label: string;
-  text: string;
-}
-
 export interface MessageContextSource {
   sourceId: string;
   label: string;
@@ -58,6 +44,7 @@ export interface MessageContextSource {
 export interface MessageAnalysisContext {
   currentState: Awaited<ReturnType<D1CaseRepository['getSnapshot']>>['currentState'];
   sources: MessageContextSource[];
+  caseMatchFound: boolean;
 }
 
 export function messageSearchTerms(message: string): string[] {
@@ -91,30 +78,6 @@ function rowsToSources(rows: ContextRow[]): MessageContextSource[] {
       locator: row.page_number === null ? `tekstblok ${row.chunk_index + 1}` : `side ${row.page_number}`,
       text,
       status: 'unknown',
-    });
-    used += text.length;
-  }
-  return sources;
-}
-
-function legalRowsToSources(rows: LegalContextRow[]): MessageContextSource[] {
-  const sources: MessageContextSource[] = [];
-  let used = 0;
-  for (const row of rows) {
-    if (used >= MAX_LEGAL_CONTEXT_CHARACTERS) break;
-    const contentKind = row.content_kind === 'verbatim_excerpt'
-      ? 'ordret uddrag'
-      : 'kurateret resumé af den linkede officielle kilde; ikke ordret lovtekst';
-    const remaining = MAX_LEGAL_CONTEXT_CHARACTERS - used;
-    const text = `Indholdstype: ${contentKind}. Version: ${row.version_label}. Kildepunkt: ${row.locator}. ${row.text}`.slice(0, remaining);
-    if (!text.trim()) continue;
-    sources.push({
-      sourceId: `legal:${row.reference_id}`,
-      label: `${row.authority}: ${row.title} — ${row.locator}`,
-      sourceType: `legal_${row.source_type}_${row.content_kind}`,
-      locator: row.source_url,
-      text,
-      status: 'current',
     });
     used += text.length;
   }
@@ -218,7 +181,7 @@ export class D1MessageHistoryRepository {
     const snapshot = await new D1CaseRepository(this.db, this.caseId).getSnapshot();
     const query = ftsQueryForMessage(message);
     let rows: ContextRow[] = [];
-    let legalRows: LegalContextRow[] = [];
+    let caseMatchFound = false;
 
     if (query) {
       try {
@@ -234,23 +197,9 @@ export class D1MessageHistoryRepository {
           LIMIT ?`)
           .bind(query, this.caseId, MAX_RELEVANT_CHUNKS).all<ContextRow>();
         rows = result.results ?? [];
+        caseMatchFound = rows.length > 0;
       } catch {
-        // Before the FTS migration is promoted, safely fall back to a small recent window.
-      }
-
-      try {
-        const legalResult = await this.db.prepare(`SELECT
-            l.id AS reference_id, l.title, l.authority, l.source_url, l.locator,
-            l.source_type, l.content_kind, l.version_label, l.text
-          FROM legal_reference_fts
-          JOIN legal_references l ON l.id = legal_reference_fts.reference_id
-          WHERE legal_reference_fts MATCH ? AND l.active = 1
-          ORDER BY bm25(legal_reference_fts), l.priority ASC
-          LIMIT ?`)
-          .bind(query, MAX_LEGAL_REFERENCES).all<LegalContextRow>();
-        legalRows = legalResult.results ?? [];
-      } catch {
-        // Legal-reference migration may not yet be present during branch preview/deploy staging.
+        // Safely fall back to a small recent window if FTS is unavailable.
       }
     }
 
@@ -265,6 +214,6 @@ export class D1MessageHistoryRepository {
       rows = fallback.results ?? [];
     }
 
-    return { currentState: snapshot.currentState, sources: [...rowsToSources(rows), ...legalRowsToSources(legalRows)] };
+    return { currentState: snapshot.currentState, sources: rowsToSources(rows), caseMatchFound };
   }
 }

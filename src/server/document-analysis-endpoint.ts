@@ -14,9 +14,6 @@ export const MAX_ANALYSIS_REQUEST_CHARACTERS = 600_000;
 export interface WorkerEnv {
   ANTHROPIC_API_KEY?: string;
   DOCUMENT_ANALYSIS_ENABLED?: string;
-  PRIVATE_DEPLOYMENT_APPROVED?: string;
-  ANTHROPIC_ZDR_APPROVED?: string;
-  PAYLOAD_LOGGING_DISABLED?: string;
   TEAM_DOMAIN?: string;
   POLICY_AUD?: string;
   DB?: D1Database;
@@ -42,10 +39,7 @@ export function buildRuntimeGate(env: WorkerEnv, authenticated: boolean): Docume
   return {
     enabled: enabled(env.DOCUMENT_ANALYSIS_ENABLED),
     authenticationEnforced: authenticated,
-    privateDeployment: enabled(env.PRIVATE_DEPLOYMENT_APPROVED),
-    anthropicRetentionApproved: enabled(env.ANTHROPIC_ZDR_APPROVED),
     serverSideSecretConfigured: Boolean(env.ANTHROPIC_API_KEY?.trim()),
-    payloadLoggingDisabled: enabled(env.PAYLOAD_LOGGING_DISABLED),
   };
 }
 
@@ -81,14 +75,10 @@ export async function handleDocumentAnalysisRequest(
 
   const gate = buildRuntimeGate(env, authenticated);
   const evaluation = evaluateDocumentAnalysisGate(gate);
-  if (!evaluation.allowed) {
-    return json({ error: 'analysis_unavailable' }, 503);
-  }
+  if (!evaluation.allowed) return json({ error: 'analysis_unavailable' }, 503);
 
   const rawBody = await request.text();
-  if (rawBody.length > MAX_ANALYSIS_REQUEST_CHARACTERS) {
-    return json({ error: 'request_too_large' }, 413);
-  }
+  if (rawBody.length > MAX_ANALYSIS_REQUEST_CHARACTERS) return json({ error: 'request_too_large' }, 413);
 
   let parsedJson: unknown;
   try {
@@ -108,12 +98,11 @@ export async function handleDocumentAnalysisRequest(
       try {
         await new D1AiUsageRepository(env.DB).record(result.usage);
       } catch {
-        // Metadata telemetry must never make a valid document analysis unavailable.
+        // Usage metadata must never make a valid document analysis unavailable.
       }
     }
     return json({ analysis: result.analysis });
   } catch (error) {
-    // Never log request/document/model payloads here. Production observability must remain metadata-only.
     const name = error instanceof Error ? error.name : 'UnknownError';
     return json({ error: 'analysis_failed', errorType: name }, 502);
   }

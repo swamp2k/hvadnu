@@ -15,10 +15,7 @@ export const MAX_SINGLE_DOCUMENT_ANALYSIS_CHARACTERS = 120_000;
 export const DocumentAnalysisGateSchema = z.object({
   enabled: z.boolean(),
   authenticationEnforced: z.boolean(),
-  privateDeployment: z.boolean(),
-  anthropicRetentionApproved: z.boolean(),
   serverSideSecretConfigured: z.boolean(),
-  payloadLoggingDisabled: z.boolean(),
 });
 
 export type DocumentAnalysisGate = z.infer<typeof DocumentAnalysisGateSchema>;
@@ -26,10 +23,7 @@ export type DocumentAnalysisGate = z.infer<typeof DocumentAnalysisGateSchema>;
 export const CLOSED_DOCUMENT_ANALYSIS_GATE: DocumentAnalysisGate = {
   enabled: false,
   authenticationEnforced: false,
-  privateDeployment: false,
-  anthropicRetentionApproved: false,
   serverSideSecretConfigured: false,
-  payloadLoggingDisabled: false,
 };
 
 export interface GateEvaluation {
@@ -41,10 +35,7 @@ export function evaluateDocumentAnalysisGate(gate: DocumentAnalysisGate): GateEv
   const blockers: string[] = [];
   if (!gate.enabled) blockers.push('document analysis is not enabled');
   if (!gate.authenticationEnforced) blockers.push('authentication is not enforced');
-  if (!gate.privateDeployment) blockers.push('deployment is not approved for private case data');
-  if (!gate.anthropicRetentionApproved) blockers.push('Anthropic retention/data processing is not approved');
   if (!gate.serverSideSecretConfigured) blockers.push('server-side Anthropic secret is not configured');
-  if (!gate.payloadLoggingDisabled) blockers.push('payload logging is not confirmed disabled');
   return { allowed: blockers.length === 0, blockers };
 }
 
@@ -84,7 +75,7 @@ function constrainSingleDocumentStatus(payload: z.infer<typeof DocumentExplanati
     sourceStatus: 'unknown' as const,
     uncertainty: [
       ...payload.uncertainty,
-      'Et enkelt dokument kan ikke alene fastslå, om det stadig er gældende eller senere er blevet erstattet.',
+      'Et enkelt dokument kan ikke alene fastslå, om det stadig gælder eller senere er blevet erstattet.',
     ],
   };
 }

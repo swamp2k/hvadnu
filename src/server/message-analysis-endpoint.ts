@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { buildReviewPlan, type ReviewContext, type ReviewPlan } from '../ai/routing';
+import { MessageToneSchema } from '../domain/message-tone';
 import { MessageAnalysisResultSchema, type MessageAnalysisPayload, type MessageAnalysisResult } from '../domain/message-result';
 import { D1AiUsageRepository } from '../storage/d1-ai-usage-repository';
 import { D1MessageHistoryRepository, type MessageAnalysisContext, type MessageContextSource } from '../storage/d1-message-history-repository';
@@ -7,40 +7,13 @@ import type { D1Database } from '../storage/d1-types';
 import { buildRuntimeGate, isAuthenticatedAccessIdentity, type WorkerEnv } from './document-analysis-endpoint';
 import { evaluateDocumentAnalysisGate } from './document-analysis-service';
 import { createAnthropicMessageAnalysisProvider, type MessageAnalysisProvider } from './anthropic-message-provider';
-import { createAnthropicWebResearchProvider, type WebResearchProvider } from './anthropic-web-research-provider';
 
 const MessageRequestSchema = z.object({
   message: z.string().trim().min(1).max(20_000),
-  webSearch: z.boolean().optional().default(false),
+  tone: MessageToneSchema.optional().default('neutral'),
 });
 const MAX_MESSAGE_REQUEST_CHARACTERS = 25_000;
-const MAX_REVIEW_SOURCE_CHARACTERS = 8_000;
 export type MessageProviderFactory = (apiKey: string) => MessageAnalysisProvider;
-export type WebResearchProviderFactory = (apiKey: string) => WebResearchProvider;
-
-const CRITICAL_PATTERNS = [
-  /\bvold\b/iu,
-  /psykisk\s+vold/iu,
-  /\bovergreb/iu,
-  /seksuel(?:t|le)?\s+overgreb/iu,
-  /\bbortfør/iu,
-  /\bmisbrug\b/iu,
-];
-const MATERIAL_CHANGE_PATTERNS = [
-  /\b(?:stopper|stoppe|aflyser|aflyse|nægter|nægte|ændrer|ændre|suspenderer|suspendere)\b.{0,80}\bsamvær\b/iu,
-  /\bsamvær\b.{0,80}\b(?:stopper|stoppe|aflyser|aflyse|nægter|nægte|ændrer|ændre|suspenderer|suspendere)\b/iu,
-  /\b(?:ændrer|ændre|flytter|flytte|kræver|kræve|søger|søge)\b.{0,80}\b(?:bopæl|forældremyndighed)\b/iu,
-  /\b(?:bopæl|forældremyndighed)\b.{0,80}\b(?:ændrer|ændre|flytter|flytte|kræver|kræve|søger|søge)\b/iu,
-  /\b(?:krav|betaling|betale|skylder|kompensation)\b.{0,80}\b\d{4,}\s*(?:kr|kroner)\b/iu,
-  /\b\d{4,}\s*(?:kr|kroner)\b.{0,80}\b(?:krav|betaling|betale|skylder|kompensation)\b/iu,
-  /\b(?:ikke|nægter|nægte)\b.{0,60}\b(?:udlevere|aflevere)\b/iu,
-];
-const DEADLINE_PATTERNS = [
-  /\bfrist\b/iu,
-  /\bdeadline\b/iu,
-  /\bsenest\b/iu,
-  /\binden\s+\d+\s+(?:dag|dage|uge|uger)\b/iu,
-];
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -82,72 +55,34 @@ function normalizeCitationMetadata(payload: MessageAnalysisPayload, context: Mes
   };
 }
 
-function matchesAny(value: string, patterns: RegExp[]): boolean {
-  return patterns.some((pattern) => pattern.test(value));
-}
-
-function buildMessageReviewContext(message: string, payload: MessageAnalysisPayload, currentSourceId: string): ReviewContext {
-  const critical = matchesAny(message, CRITICAL_PATTERNS);
-  const materialChange = matchesAny(message, MATERIAL_CHANGE_PATTERNS);
-  const highRisk = critical || materialChange || payload.legalAssessment.level === 'attention';
-  const externalEvidenceCount = [...referencedSourceIds(payload)].filter((sourceId) => sourceId !== currentSourceId).length;
-  const evidenceSufficiency: ReviewContext['evidenceSufficiency'] = externalEvidenceCount === 0
-    ? 'insufficient'
-    : payload.uncertainty.level === 'low' ? 'sufficient' : 'partial';
-
+function appendWebCitations(payload: MessageAnalysisPayload, webSources: MessageContextSource[]): MessageAnalysisPayload {
+  const existing = new Set(payload.citations.map((citation) => citation.sourceId));
   return {
-    riskLevel: critical ? 'critical' : highRisk ? 'high' : 'medium',
-    legalUncertainty: payload.uncertainty.level,
-    evidenceSufficiency,
-    conflictingSources: payload.citations.some((citation) => citation.status === 'disputed'),
-    bindingDeadlineDetected: matchesAny(message, DEADLINE_PATTERNS),
+    ...payload,
+    citations: [
+      ...payload.citations,
+      ...webSources
+        .filter((source) => !existing.has(source.sourceId))
+        .map((source) => ({
+          sourceId: source.sourceId,
+          label: source.label,
+          status: source.status,
+          locator: source.locator,
+        })),
+    ],
   };
 }
 
-function narrowReviewContext(context: MessageAnalysisContext, payload: MessageAnalysisPayload, currentSourceId: string): MessageAnalysisContext {
-  const required = referencedSourceIds(payload);
-  required.add(currentSourceId);
-
-  const prioritized = [
-    ...context.sources.filter((source) => required.has(source.sourceId)),
-    ...context.sources.filter((source) => !required.has(source.sourceId)).slice(0, 3),
-  ];
-  const seen = new Set<string>();
-  const sources: MessageContextSource[] = [];
-  let used = 0;
-
-  for (const source of prioritized) {
-    const key = `${source.sourceId}:${source.locator}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    if (source.sourceId === currentSourceId) {
-      sources.push(source);
-      used += source.text.length;
-      continue;
-    }
-    if (used >= MAX_REVIEW_SOURCE_CHARACTERS) break;
-    const remaining = MAX_REVIEW_SOURCE_CHARACTERS - used;
-    const text = source.text.slice(0, remaining);
-    if (!text.trim()) continue;
-    sources.push({ ...source, text });
-    used += text.length;
-  }
-
-  return { currentState: context.currentState, sources };
-}
-
-function finalCitedWebSources(context: MessageAnalysisContext, payload: MessageAnalysisPayload): MessageContextSource[] {
-  const referenced = referencedSourceIds(payload);
-  return context.sources.filter((source) =>
-    referenced.has(source.sourceId)
-    && (source.sourceType === 'web_official' || source.sourceType === 'web_secondary'));
-}
-
-function finalizeAnalysis(payload: MessageAnalysisPayload, plan: ReviewPlan): MessageAnalysisResult {
+function finalizeAnalysis(payload: MessageAnalysisPayload): MessageAnalysisResult {
   return MessageAnalysisResultSchema.parse({
     ...payload,
     mode: 'model_analysis',
-    reviewPlan: plan,
+    reviewPlan: {
+      model: 'claude-sonnet-5',
+      passes: 1,
+      humanReviewRecommended: false,
+      reasons: [],
+    },
   });
 }
 
@@ -155,7 +90,7 @@ async function recordUsage(db: D1Database, usage: Parameters<D1AiUsageRepository
   try {
     await new D1AiUsageRepository(db).record(usage);
   } catch {
-    // Metadata telemetry must never make a valid analysis unavailable.
+    // Usage metadata must never make a valid analysis unavailable.
   }
 }
 
@@ -164,14 +99,12 @@ export async function handleMessageAnalysisRequest(
   env: WorkerEnv,
   authenticatedEmail: string | null | undefined,
   providerFactory: MessageProviderFactory = createAnthropicMessageAnalysisProvider,
-  webResearchProviderFactory: WebResearchProviderFactory = createAnthropicWebResearchProvider,
 ): Promise<Response> {
   if (request.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
-  const authenticated = isAuthenticatedAccessIdentity(authenticatedEmail);
-  if (!authenticated) return json({ error: 'unauthorized' }, 401);
+  if (!isAuthenticatedAccessIdentity(authenticatedEmail)) return json({ error: 'unauthorized' }, 401);
   if (!env.DB) return json({ error: 'persistence_unavailable' }, 503);
 
-  const evaluation = evaluateDocumentAnalysisGate(buildRuntimeGate(env, authenticated));
+  const evaluation = evaluateDocumentAnalysisGate(buildRuntimeGate(env, true));
   if (!evaluation.allowed) return json({ error: 'analysis_unavailable' }, 503);
 
   const rawBody = await request.text();
@@ -188,6 +121,7 @@ export async function handleMessageAnalysisRequest(
 
   const repository = new D1MessageHistoryRepository(env.DB);
   const sourceId = crypto.randomUUID();
+
   try {
     const context = await repository.getAnalysisContext(parsed.data.message);
     context.sources.unshift({
@@ -199,50 +133,19 @@ export async function handleMessageAnalysisRequest(
       status: 'unknown',
     });
 
-    let webSearchFailed = false;
-    if (parsed.data.webSearch) {
-      try {
-        const research = await webResearchProviderFactory(env.ANTHROPIC_API_KEY!).research(parsed.data.message);
-        await recordUsage(env.DB, research.usage);
-        context.sources.push(...research.sources);
-      } catch {
-        // Optional research must not make the core case/legal-library analysis unavailable.
-        webSearchFailed = true;
-      }
-    }
-
     const provider = providerFactory(env.ANTHROPIC_API_KEY!);
-    const first = await provider.analyze({ context });
-    await recordUsage(env.DB, first.usage);
-    const firstPayload = normalizeCitationMetadata(first.payload, context);
-    assertKnownSourceIds(firstPayload, context);
+    const modelResult = await provider.analyze({ context, tone: parsed.data.tone });
+    await recordUsage(env.DB, modelResult.usage);
 
-    const reviewContext = buildMessageReviewContext(parsed.data.message, firstPayload, sourceId);
-    const plan = buildReviewPlan(reviewContext);
-    let finalPayload = firstPayload;
+    const normalized = normalizeCitationMetadata(modelResult.payload, context);
+    assertKnownSourceIds(normalized, context);
+    const analysis = finalizeAnalysis(appendWebCitations(normalized, modelResult.webSources));
 
-    if (plan.passes === 2) {
-      const narrowContext = narrowReviewContext(context, firstPayload, sourceId);
-      const reviewed = await provider.review({ context: narrowContext, firstAnalysis: firstPayload });
-      await recordUsage(env.DB, reviewed.usage);
-      const reviewedPayload = normalizeCitationMetadata(reviewed.payload, narrowContext);
-      assertKnownSourceIds(reviewedPayload, narrowContext);
-      finalPayload = reviewedPayload;
-    }
-
-    const analysis = finalizeAnalysis(finalPayload, plan);
-    const citedWebSources = finalCitedWebSources(context, finalPayload);
-    const webSearch = {
-      requested: parsed.data.webSearch,
-      used: citedWebSources.length > 0,
-      sourceCount: citedWebSources.length,
-      failed: webSearchFailed,
-    };
     try {
-      const saved = await repository.saveAnalyzedMessage(parsed.data.message, analysis, sourceId, citedWebSources);
-      return json({ analysis, historySaved: true, webSearch, ...saved });
+      const saved = await repository.saveAnalyzedMessage(parsed.data.message, analysis, sourceId, modelResult.webSources);
+      return json({ analysis, historySaved: true, ...saved });
     } catch {
-      return json({ analysis, historySaved: false, webSearch });
+      return json({ analysis, historySaved: false });
     }
   } catch (error) {
     const name = error instanceof Error ? error.name : 'UnknownError';

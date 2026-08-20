@@ -1,23 +1,21 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import type { MessageTone } from '../domain/message-tone';
 import type { MessageAnalysisResult, MessageHistoryEntry } from '../domain/message-result';
 import { analyzeMessage, getMessageHistory, MessageApiError } from './message-api';
 
-const levelMeta = {
-  supported: { label: 'Understøttet', className: 'status-supported' },
-  uncertain: { label: 'Uklar', className: 'status-uncertain' },
-  not_supported: { label: 'Ikke dokumenteret', className: 'status-not-supported' },
-  attention: { label: 'Kræver opmærksomhed', className: 'status-attention' },
-} as const;
+const tones: Array<{ value: MessageTone; label: string }> = [
+  { value: 'neutral', label: 'Neutral' },
+  { value: 'firm', label: 'Bestemt' },
+  { value: 'hesitant', label: 'Tøvende' },
+  { value: 'optimistic', label: 'Optimistisk' },
+  { value: 'legal', label: 'Juridisk' },
+  { value: 'sad', label: 'Ked' },
+  { value: 'confused', label: 'Forvirret' },
+  { value: 'tired', label: 'Træt' },
+];
 
-function BulletList({ items, emptyText }: { items: string[]; emptyText: string }) {
-  if (items.length === 0) return <p className="muted compact">{emptyText}</p>;
-  return <ul className="bullet-list">{items.map((item) => <li key={item}>{item}</li>)}</ul>;
-}
-
-function ResultView({ result }: { result: MessageAnalysisResult }) {
+function ResultView({ result, message }: { result: MessageAnalysisResult; message: string }) {
   const [copied, setCopied] = useState(false);
-  const meta = levelMeta[result.legalAssessment.level];
-  const labels = useMemo(() => new Map(result.citations.map((citation) => [citation.sourceId, citation.label])), [result.citations]);
 
   async function copyReply() {
     try {
@@ -29,29 +27,68 @@ function ResultView({ result }: { result: MessageAnalysisResult }) {
     }
   }
 
-  const sourceChips = (sourceIds: string[]) => sourceIds.length === 0 ? null : (
-    <div className="source-links" aria-label="Kilder">
-      {sourceIds.map((sourceId) => <span className="source-chip" key={sourceId}>{labels.get(sourceId) ?? sourceId}</span>)}
-    </div>
-  );
-
   return (
     <section className="result-stack" aria-live="polite">
-      <div className="result-heading"><div><p className="eyebrow">Analyse</p><h2>Det vigtigste først</h2></div><span className={`status-pill ${meta.className}`}>{meta.label}</span></div>
-      <article className="card summary-card"><p>{result.summary}</p></article>
-      <div className="two-up">
-        <article className="card"><h3>Det bør du svare på</h3><BulletList items={result.replyNeeded} emptyText="Der er ikke noget bestemt, du behøver at svare på." /></article>
-        <article className="card quiet-card"><h3>Det kan du lade ligge</h3><BulletList items={result.canIgnore} emptyText="Der er ikke noget oplagt, du kan ignorere." /></article>
-      </div>
-      {result.caseContext.length > 0 && <article className="card"><div className="section-title-row"><h3>Det bygger vurderingen på</h3><span className="source-count">{result.caseContext.length} fund</span></div><div className="context-list">{result.caseContext.map((item) => <div className="context-item" key={`${item.text}-${item.sourceIds.join('-')}`}><p>{item.text}</p>{sourceChips(item.sourceIds)}</div>)}</div></article>}
-      <article className="card assessment-card"><div className="section-title-row"><h3>Juridisk vurdering</h3><span className={`status-dot ${meta.className}`} aria-hidden="true" /></div><strong>{result.legalAssessment.title}</strong><p>{result.legalAssessment.explanation}</p>{sourceChips(result.legalAssessment.sourceIds)}</article>
-      <article className="card"><h3>Sådan kan beskeden læses</h3><strong>{result.communicationAssessment.title}</strong><p>{result.communicationAssessment.explanation}</p></article>
-      <article className="card reply-card"><div className="section-title-row"><h3>Forslag til svar</h3><button className="text-button" type="button" onClick={copyReply}>{copied ? 'Kopieret' : 'Kopiér'}</button></div><blockquote>{result.suggestedReply}</blockquote></article>
-      <article className="card uncertainty-card"><div className="section-title-row"><h3>Det er vi ikke sikre på</h3><span className="uncertainty-label">{result.uncertainty.level === 'high' ? 'Meget' : result.uncertainty.level === 'medium' ? 'Noget' : 'Lidt'}</span></div><BulletList items={result.uncertainty.missing} emptyText="Der mangler ikke noget vigtigt for denne vurdering." />{result.reviewPlan.humanReviewRecommended && <div className="review-strip"><strong>Det kan være en god idé at få en jurist til at se på dette</strong></div>}</article>
-      {result.citations.length > 0 && <details className="card source-details"><summary>Kilder ({result.citations.length})</summary><div className="source-detail-list">{result.citations.map((citation) => {
-        const url = citation.locator?.startsWith('https://') || citation.locator?.startsWith('http://') ? citation.locator : null;
-        return <div key={`${citation.sourceId}-${citation.locator ?? ''}`}><strong>{citation.label}</strong>{url ? <p><a href={url} target="_blank" rel="noreferrer">Åbn kilde</a></p> : <p className="muted">{citation.locator ?? ''}</p>}</div>;
-      })}</div></details>}
+      <article className="card message-result-card message-result-received">
+        <h3>Modtaget besked</h3>
+        <p>{message}</p>
+      </article>
+
+      <article className="card message-result-card message-result-reply">
+        <div className="section-title-row">
+          <h3>Forslag til svar</h3>
+          <button className="text-button" type="button" onClick={copyReply}>{copied ? 'Kopieret' : 'Kopiér'}</button>
+        </div>
+        <blockquote>{result.suggestedReply}</blockquote>
+      </article>
+
+      <article className="card message-result-card message-result-analysis">
+        <h3>AI fortolkning og analyse</h3>
+        <p className="analysis-lead">{result.summary}</p>
+
+        <div className="analysis-detail">
+          <strong>{result.communicationAssessment.title}</strong>
+          <p>{result.communicationAssessment.explanation}</p>
+        </div>
+
+        {result.legalAssessment.explanation && (
+          <div className="analysis-detail">
+            <strong>{result.legalAssessment.title}</strong>
+            <p>{result.legalAssessment.explanation}</p>
+          </div>
+        )}
+
+        {(result.replyNeeded.length > 0 || result.canIgnore.length > 0) && (
+          <div className="analysis-points">
+            {result.replyNeeded.length > 0 && <div><strong>Det er værd at svare på</strong><ul>{result.replyNeeded.map((item) => <li key={item}>{item}</li>)}</ul></div>}
+            {result.canIgnore.length > 0 && <div><strong>Det kan du godt lade ligge</strong><ul>{result.canIgnore.map((item) => <li key={item}>{item}</li>)}</ul></div>}
+          </div>
+        )}
+
+        {result.uncertainty.missing.length > 0 && (
+          <details className="analysis-uncertainty">
+            <summary>Det er ikke helt klart</summary>
+            <ul>{result.uncertainty.missing.map((item) => <li key={item}>{item}</li>)}</ul>
+          </details>
+        )}
+
+        {result.citations.length > 0 && (
+          <details className="analysis-sources">
+            <summary>Kilder ({result.citations.length})</summary>
+            <div className="source-detail-list">
+              {result.citations.map((citation) => {
+                const url = citation.locator?.startsWith('https://') || citation.locator?.startsWith('http://') ? citation.locator : null;
+                return (
+                  <div key={`${citation.sourceId}-${citation.locator ?? ''}`}>
+                    <strong>{citation.label}</strong>
+                    {url ? <p><a href={url} target="_blank" rel="noreferrer">Åbn kilde</a></p> : citation.locator ? <p className="muted">{citation.locator}</p> : null}
+                  </div>
+                );
+              })}
+            </div>
+          </details>
+        )}
+      </article>
     </section>
   );
 }
@@ -80,13 +117,13 @@ function History({ entries }: { entries: MessageHistoryEntry[] }) {
 
 export function MessageAssistantView() {
   const [message, setMessage] = useState('');
-  const [webSearch, setWebSearch] = useState(false);
+  const [tone, setTone] = useState<MessageTone>('neutral');
   const [result, setResult] = useState<MessageAnalysisResult | null>(null);
+  const [analyzedMessage, setAnalyzedMessage] = useState('');
   const [history, setHistory] = useState<MessageHistoryEntry[]>([]);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [historyWarning, setHistoryWarning] = useState<string | null>(null);
-  const [webSearchWarning, setWebSearchWarning] = useState<string | null>(null);
   const trimmed = useMemo(() => message.trim(), [message]);
 
   async function refreshHistory() {
@@ -101,14 +138,11 @@ export function MessageAssistantView() {
     setWorking(true);
     setError(null);
     setHistoryWarning(null);
-    setWebSearchWarning(null);
     try {
-      const response = await analyzeMessage(trimmed, { webSearch });
+      const response = await analyzeMessage(trimmed, { tone });
       setResult(response.analysis);
+      setAnalyzedMessage(trimmed);
       if (!response.historySaved) setHistoryWarning('Analysen lykkedes, men historikken kunne ikke gemmes.');
-      if (response.webSearch.requested && response.webSearch.failed) {
-        setWebSearchWarning('Websøgningen kunne ikke gennemføres. Svaret er lavet ud fra sagen og det juridiske bibliotek.');
-      }
       await refreshHistory();
     } catch (cause) {
       setResult(null);
@@ -120,20 +154,32 @@ export function MessageAssistantView() {
 
   return (
     <>
-      <section className="intro"><h2>Hvad har du fået?</h2><p>Indsæt beskeden, så får du en kort vurdering og et forslag til svar. Beskeden og svaret gemmes automatisk i historikken.</p></section>
+      <section className="intro"><h2>Hvad har du fået?</h2><p>Indsæt beskeden, vælg tonen du gerne vil svare i, og få et forslag med en kort forklaring.</p></section>
       <form className="message-form" onSubmit={(event) => { void submit(event); }}>
+        <div className="tone-row">
+          <span className="tone-label">Svar som</span>
+          <div className="tone-toolbar" role="group" aria-label="Tone for svar">
+            {tones.map((item) => (
+              <button
+                className={`tone-chip ${tone === item.value ? 'tone-chip-active' : ''}`}
+                type="button"
+                key={item.value}
+                aria-pressed={tone === item.value}
+                disabled={working}
+                onClick={() => setTone(item.value)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <label htmlFor="message">Modtaget besked</label>
         <textarea id="message" value={message} onChange={(event) => { setMessage(event.target.value); setResult(null); }} placeholder="Indsæt beskeden her …" rows={7} autoComplete="off" spellCheck />
-        <label className="web-search-toggle">
-          <input type="checkbox" checked={webSearch} onChange={(event) => setWebSearch(event.target.checked)} disabled={working} />
-          <span><strong>Søg også på nettet</strong><small>Finder fx nyere vejledning og afgørelser. Søgningen forsøger at undgå personlige detaljer.</small></span>
-        </label>
-        <button className="primary-button" type="submit" disabled={!trimmed || working}>{working ? 'Analyserer …' : 'Analysér besked'}</button>
+        <button className="primary-button" type="submit" disabled={!trimmed || working}>{working ? 'Tænker …' : 'Lav svar'}</button>
       </form>
-      {error && <section className="card error-card" role="alert"><strong>Analyse mislykkedes</strong><p>{error}</p></section>}
+      {error && <section className="card error-card" role="alert"><strong>Det lykkedes ikke</strong><p>{error}</p></section>}
       {historyWarning && <section className="card uncertainty-card" role="status"><strong>Historik ikke gemt</strong><p>{historyWarning}</p></section>}
-      {webSearchWarning && <section className="card uncertainty-card" role="status"><strong>Websøgning sprang over</strong><p>{webSearchWarning}</p></section>}
-      {result && <ResultView result={result} />}
+      {result && <ResultView result={result} message={analyzedMessage} />}
       <History entries={history} />
     </>
   );

@@ -11,9 +11,6 @@ import { createAnthropicDocumentAnalysisProvider } from '../../src/server/anthro
 const openEnv: WorkerEnv = {
   ANTHROPIC_API_KEY: 'synthetic-test-key',
   DOCUMENT_ANALYSIS_ENABLED: 'true',
-  PRIVATE_DEPLOYMENT_APPROVED: 'true',
-  ANTHROPIC_ZDR_APPROVED: 'true',
-  PAYLOAD_LOGGING_DISABLED: 'true',
 };
 
 const documentPayload = {
@@ -67,36 +64,31 @@ function validProviderFactory(): ProviderFactory {
   }));
 }
 
-describe('M2c document analysis endpoint', () => {
+describe('document analysis endpoint', () => {
   it('rejects requests without a verified Cloudflare Access identity', async () => {
     const factory = validProviderFactory();
-    const response = await handleDocumentAnalysisRequest(
-      request(JSON.stringify(documentPayload)),
-      openEnv,
-      null,
-      factory,
-    );
+    const response = await handleDocumentAnalysisRequest(request(JSON.stringify(documentPayload)), openEnv, null, factory);
     expect(response.status).toBe(401);
     expect(factory).not.toHaveBeenCalled();
   });
 
-  it('accepts any identity already authorized by Cloudflare Access', async () => {
+  it('accepts an identity authorized by Cloudflare Access', async () => {
     const factory = validProviderFactory();
     const response = await handleDocumentAnalysisRequest(
       request(JSON.stringify(documentPayload)),
       openEnv,
-      'another-authorized-user@example.invalid',
+      'authorized-user@example.invalid',
       factory,
     );
     expect(response.status).toBe(200);
     expect(factory).toHaveBeenCalledWith('synthetic-test-key');
   });
 
-  it('keeps the provider closed when ZDR approval is missing', async () => {
+  it('is unavailable when the server-side Anthropic key is missing', async () => {
     const factory = validProviderFactory();
     const response = await handleDocumentAnalysisRequest(
       request(JSON.stringify(documentPayload)),
-      { ...openEnv, ANTHROPIC_ZDR_APPROVED: 'false' },
+      { DOCUMENT_ANALYSIS_ENABLED: 'true' },
       'case-owner@example.invalid',
       factory,
     );
@@ -105,7 +97,7 @@ describe('M2c document analysis endpoint', () => {
     expect(factory).not.toHaveBeenCalled();
   });
 
-  it('returns validated structured analysis when every runtime gate is open', async () => {
+  it('returns validated structured analysis when AI is available', async () => {
     const factory = validProviderFactory();
     const response = await handleDocumentAnalysisRequest(
       request(JSON.stringify(documentPayload)),
@@ -115,12 +107,8 @@ describe('M2c document analysis endpoint', () => {
     );
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
-      analysis: {
-        mode: 'model_analysis',
-        sourceStatus: 'proposal',
-      },
+      analysis: { mode: 'model_analysis', sourceStatus: 'proposal' },
     });
-    expect(factory).toHaveBeenCalledWith('synthetic-test-key');
   });
 
   it('rejects an oversized request before provider construction', async () => {

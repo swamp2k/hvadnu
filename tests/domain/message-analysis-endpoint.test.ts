@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { handleMessageAnalysisRequest } from '../../src/server/message-analysis-endpoint';
 import type { MessageAnalysisProvider } from '../../src/server/anthropic-message-provider';
-import type { WebResearchProvider } from '../../src/server/anthropic-web-research-provider';
 import type { WorkerEnv } from '../../src/server/document-analysis-endpoint';
 import type { MessageContextSource } from '../../src/storage/d1-message-history-repository';
 import type { D1Database, D1PreparedStatement, D1Result } from '../../src/storage/d1-types';
@@ -34,63 +33,53 @@ function env(db: D1Database): WorkerEnv {
     DB: db,
     ANTHROPIC_API_KEY: 'synthetic-key',
     DOCUMENT_ANALYSIS_ENABLED: 'true',
-    PRIVATE_DEPLOYMENT_APPROVED: 'true',
-    ANTHROPIC_ZDR_APPROVED: 'true',
-    PAYLOAD_LOGGING_DISABLED: 'true',
   };
 }
 
-function request(message = 'Kan børnene hentes torsdag kl. 16?', webSearch = false) {
+function request(message = 'Kan vi flytte afhentning til torsdag?', tone = 'neutral') {
   return new Request('https://private.example.invalid/api/analyze-message', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ message, webSearch }),
+    body: JSON.stringify({ message, tone }),
   });
 }
 
-function payloadFor(id: string, highUncertainty = true) {
+function payloadFor(id: string) {
   return {
-    summary: 'Beskeden spørger om et ændret tidspunkt.',
+    summary: 'Beskeden spørger om et andet tidspunkt.',
     replyNeeded: ['Svar på tidspunktet.'],
     canIgnore: [],
     caseContext: [{ text: 'Den aktuelle besked spørger om torsdag.', sourceIds: [id] }],
     legalAssessment: {
       level: 'uncertain' as const,
-      title: 'Kræver sagsgrundlag',
-      explanation: 'Der er ikke leveret en aktuel juridisk kilde, som afgør spørgsmålet.',
+      title: 'Praktisk vurdering',
+      explanation: 'Det afhænger af den konkrete aftale.',
       sourceIds: [id],
     },
-    communicationAssessment: { title: 'Svar kort', explanation: 'Hold svaret neutralt.' },
-    suggestedReply: 'Jeg vender tilbage om tidspunktet.',
-    uncertainty: highUncertainty
-      ? { level: 'high' as const, missing: ['Aktuel aftale eller afgørelse.'] }
-      : { level: 'medium' as const, missing: ['Aktuel aftale eller afgørelse.'] },
+    communicationAssessment: { title: 'Kort spørgsmål', explanation: 'Der bliver bedt om en konkret ændring.' },
+    suggestedReply: 'Torsdag passer fint.',
+    uncertainty: { level: 'medium' as const, missing: ['Den fulde aftale er ikke kendt.'] },
     citations: [{ sourceId: id, label: 'Aktuel besked', status: 'unknown' as const, locator: 'hele beskeden' }],
   };
 }
 
-function usage(taskType: 'message_analysis' | 'message_review' | 'web_research', effort: 'medium' | 'high') {
-  return {
-    taskType,
-    model: 'claude-sonnet-5' as const,
-    effort,
-    inputTokens: 100,
-    outputTokens: 20,
-    cacheCreationInputTokens: 0,
-    cacheReadInputTokens: 0,
-    thinkingTokens: 5,
-    latencyMs: 10,
-    contextCharacters: 200,
-  };
-}
+const usage = {
+  taskType: 'message_analysis' as const,
+  model: 'claude-sonnet-5' as const,
+  effort: 'medium' as const,
+  inputTokens: 100,
+  outputTokens: 20,
+  cacheCreationInputTokens: 0,
+  cacheReadInputTokens: 0,
+  thinkingTokens: 5,
+  latencyMs: 10,
+  contextCharacters: 200,
+};
 
-function providerFor(sourceId: (context: Parameters<MessageAnalysisProvider['analyze']>[0]['context']) => string, highUncertainty = true): MessageAnalysisProvider {
+function providerFor(sourceId: (context: Parameters<MessageAnalysisProvider['analyze']>[0]['context']) => string, webSources: MessageContextSource[] = []): MessageAnalysisProvider {
   return {
     async analyze({ context }) {
-      return { payload: payloadFor(sourceId(context), highUncertainty), usage: usage('message_analysis', 'medium') };
-    },
-    async review({ context }) {
-      return { payload: payloadFor(sourceId(context), false), usage: usage('message_review', 'high') };
+      return { payload: payloadFor(sourceId(context)), webSources, usage };
     },
   };
 }
@@ -98,23 +87,15 @@ function providerFor(sourceId: (context: Parameters<MessageAnalysisProvider['ana
 function webSource(): MessageContextSource {
   return {
     sourceId: 'web:1',
-    label: 'Officiel webkilde: Syntetisk domstolsafgørelse',
+    label: 'Officiel webkilde: Syntetisk vejledning',
     sourceType: 'web_official',
-    locator: 'https://www.domstol.dk/synthetic/decision',
-    text: 'Syntetisk citeret tekst fra en offentlig afgørelse.',
+    locator: 'https://www.domstol.dk/synthetic/guide',
+    text: 'Syntetisk citeret tekst.',
     status: 'unknown',
   };
 }
 
-function webProvider(source = webSource()): WebResearchProvider {
-  return {
-    async research() {
-      return { sources: [source], usage: usage('web_research', 'medium') };
-    },
-  };
-}
-
-describe('M4 legal-aware live message analysis', () => {
+describe('simplified live message analysis', () => {
   it('fails closed before D1/provider work without Access identity', async () => {
     const db = new FakeDb();
     let constructed = false;
@@ -127,149 +108,61 @@ describe('M4 legal-aware live message analysis', () => {
     expect(db.statements).toHaveLength(0);
   });
 
-  it('does not pay for a second Sonnet pass merely because evidence is uncertain or samvær is mentioned', async () => {
+  it('uses exactly one provider pass, forwards tone, saves history and never queries the local legal library', async () => {
     const db = new FakeDb();
-    let reviewCalled = false;
-    const base = providerFor((context) => context.sources[0]!.sourceId, true);
+    let calls = 0;
+    let receivedTone = '';
     const response = await handleMessageAnalysisRequest(
-      request('Kan vi bytte samværsweekend denne ene gang?'),
+      request('Kan vi flytte afhentning til torsdag?', 'firm'),
       env(db),
       'user@example.invalid',
       () => ({
-        ...base,
-        async review(input) {
-          reviewCalled = true;
-          return base.review(input);
+        async analyze({ context, tone }) {
+          calls += 1;
+          receivedTone = tone;
+          return { payload: payloadFor(context.sources[0]!.sourceId), webSources: [], usage };
         },
       }),
     );
+
     expect(response.status).toBe(200);
-    const body = await response.json() as {
-      historySaved: boolean;
-      sourceId: string;
-      analysis: { reviewPlan: { passes: number }; citations: Array<{ sourceId: string }> };
-    };
+    const body = await response.json() as { historySaved: boolean; analysis: { reviewPlan: { passes: number } } };
     expect(body.historySaved).toBe(true);
     expect(body.analysis.reviewPlan.passes).toBe(1);
-    expect(reviewCalled).toBe(false);
-    expect(body.analysis.citations[0]?.sourceId).toBe(body.sourceId);
-    expect(db.batches.some((batch) => batch.some((statement) => statement.query.includes('ai_usage_events')))).toBe(true);
-    expect(db.batches.some((batch) => batch.some((statement) => statement.query.includes("'message'")))).toBe(true);
+    expect(calls).toBe(1);
+    expect(receivedTone).toBe('firm');
+    expect(db.statements.some((statement) => statement.query.includes('legal_reference'))).toBe(false);
+    expect(db.batches.filter((batch) => batch.some((statement) => statement.query.includes('ai_usage_events')))).toHaveLength(1);
   });
 
-  it('uses a high-effort second pass for materially risky uncertain samvær changes', async () => {
-    const db = new FakeDb();
-    let reviewCalled = false;
-    const base = providerFor((context) => context.sources[0]!.sourceId, true);
-    const response = await handleMessageAnalysisRequest(
-      request('Jeg stopper samvær fra næste weekend. Hvad skal jeg svare?'),
-      env(db),
-      'user@example.invalid',
-      () => ({
-        ...base,
-        async review(input) {
-          reviewCalled = true;
-          return base.review(input);
-        },
-      }),
-    );
-    expect(response.status).toBe(200);
-    const body = await response.json() as { analysis: { reviewPlan: { passes: number; humanReviewRecommended: boolean } } };
-    expect(body.analysis.reviewPlan.passes).toBe(2);
-    expect(body.analysis.reviewPlan.humanReviewRecommended).toBe(true);
-    expect(reviewCalled).toBe(true);
-    const telemetryWrites = db.batches.filter((batch) => batch.some((statement) => statement.query.includes('ai_usage_events')));
-    expect(telemetryWrites).toHaveLength(2);
-  });
-
-  it('adds opt-in web research as evidence, normalizes its citation metadata, and snapshots only cited web material', async () => {
+  it('adds web citations returned by the same Sonnet pass and snapshots them with history', async () => {
     const db = new FakeDb();
     const source = webSource();
-    const mainProvider: MessageAnalysisProvider = {
-      async analyze({ context }) {
-        expect(context.sources.some((item) => item.sourceId === source.sourceId)).toBe(true);
-        return {
-          payload: {
-            summary: 'En offentlig afgørelse kan være relevant.',
-            replyNeeded: ['Svar kort.'],
-            canIgnore: [],
-            caseContext: [{ text: 'Webkilden er relevant research.', sourceIds: [source.sourceId] }],
-            legalAssessment: {
-              level: 'supported',
-              title: 'Research fundet',
-              explanation: 'Det konkrete webuddrag understøtter vurderingen.',
-              sourceIds: [source.sourceId],
-            },
-            communicationAssessment: { title: 'Neutral', explanation: 'Svar neutralt.' },
-            suggestedReply: 'Tak. Jeg forholder mig til det skriftligt.',
-            uncertainty: { level: 'low', missing: [] },
-            citations: [{
-              sourceId: source.sourceId,
-              label: 'MODEL MAY NOT CHOOSE LABEL',
-              status: 'current',
-              locator: 'https://invented.example.invalid/',
-            }],
-          },
-          usage: usage('message_analysis', 'medium'),
-        };
-      },
-      async review() {
-        throw new Error('review_not_expected');
-      },
-    };
-
     const response = await handleMessageAnalysisRequest(
-      request('Findes der afgørelser om dette samværsspørgsmål?', true),
+      request('Er der nyere offentlig information om det her?'),
       env(db),
       'user@example.invalid',
-      () => mainProvider,
-      () => webProvider(source),
+      () => providerFor((context) => context.sources[0]!.sourceId, [source]),
     );
+
     expect(response.status).toBe(200);
-    const body = await response.json() as {
-      historySaved: boolean;
-      webSearch: { requested: boolean; used: boolean; sourceCount: number; failed: boolean };
-      analysis: { citations: Array<{ sourceId: string; label: string; locator?: string; status: string }> };
-    };
-    expect(body.historySaved).toBe(true);
-    expect(body.webSearch).toEqual({ requested: true, used: true, sourceCount: 1, failed: false });
-    expect(body.analysis.citations[0]).toMatchObject({
-      sourceId: 'web:1',
-      label: source.label,
-      locator: source.locator,
-      status: 'unknown',
-    });
+    const body = await response.json() as { analysis: { citations: Array<{ sourceId: string; locator?: string }> } };
+    expect(body.analysis.citations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceId: 'web:1', locator: source.locator }),
+    ]));
     const webInsert = db.batches.flat().find((statement) => statement.query.includes('INSERT INTO message_web_sources'));
     expect(webInsert?.values).toContain(source.locator);
     expect(webInsert?.values).toContain(source.text);
-    const telemetryWrites = db.batches.filter((batch) => batch.some((statement) => statement.query.includes('ai_usage_events')));
-    expect(telemetryWrites).toHaveLength(2);
   });
 
-  it('fails soft when optional web research is unavailable and still analyzes from case/library context', async () => {
+  it('rejects fabricated saved-case source IDs and does not persist message history', async () => {
     const db = new FakeDb();
-    const base = providerFor((context) => context.sources[0]!.sourceId, false);
     const response = await handleMessageAnalysisRequest(
-      request('Hvad gælder om samvær?', true),
+      request(),
       env(db),
       'user@example.invalid',
-      () => base,
-      () => ({ async research() { throw new Error('synthetic_web_failure'); } }),
+      () => providerFor(() => 'invented-source'),
     );
-    expect(response.status).toBe(200);
-    const body = await response.json() as {
-      historySaved: boolean;
-      webSearch: { requested: boolean; used: boolean; sourceCount: number; failed: boolean };
-    };
-    expect(body.historySaved).toBe(true);
-    expect(body.webSearch).toEqual({ requested: true, used: false, sourceCount: 0, failed: true });
-    expect(db.batches.flat().some((statement) => statement.query.includes('message_web_sources'))).toBe(false);
-  });
-
-  it('rejects fabricated source IDs and does not persist message history', async () => {
-    const db = new FakeDb();
-    const response = await handleMessageAnalysisRequest(request(), env(db), 'user@example.invalid', () =>
-      providerFor(() => 'invented-source'));
     expect(response.status).toBe(502);
     expect(db.batches.some((batch) => batch.some((statement) => statement.query.includes("'message'")))).toBe(false);
   });

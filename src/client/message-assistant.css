@@ -1,0 +1,79 @@
+.tone-row {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.tone-label {
+  color: #66746e;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.tone-toolbar {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 1px 0 4px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.tone-toolbar::-webkit-scrollbar { display: none; }
+
+.tone-chip {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid #d9e1dc;
+  border-radius: 999px;
+  background: #f6f8f6;
+  color: #53635d;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 750;
+}
+.tone-chip-active {
+  border-color: #315d4e;
+  background: #e3eee8;
+  color: #173f35;
+}
+.tone-chip:disabled { opacity: 0.55; cursor: default; }
+
+.message-result-card h3 { margin-bottom: 8px; }
+.message-result-card > p { margin-top: 0; }
+.message-result-received { background: #e3f1e7; color: #285c39; border-color: #d1e5d6; }
+.message-result-reply { background: #e8f1f7; color: #244b65; border-color: #d6e5ee; }
+.message-result-analysis { background: #f8efc7; color: #66551b; border-color: #eee0a6; }
+
+.message-result-reply blockquote {
+  margin: 10px 0 0;
+  font-size: 17px;
+  line-height: 1.55;
+  font-weight: 620;
+}
+.message-result-reply .text-button { background: rgba(36, 75, 101, 0.1); color: #244b65; }
+
+.analysis-lead { font-size: 16px; font-weight: 650; }
+.analysis-detail,
+.analysis-points,
+.analysis-uncertainty,
+.analysis-sources {
+  margin-top: 14px;
+  padding-top: 13px;
+  border-top: 1px solid rgba(102, 85, 27, 0.14);
+}
+.analysis-detail p { margin-top: 5px; }
+.analysis-points { display: grid; gap: 12px; }
+.analysis-points ul,
+.analysis-uncertainty ul { margin: 6px 0 0; padding-left: 18px; }
+.analysis-points li,
+.analysis-uncertainty li { margin: 5px 0; line-height: 1.45; }
+.analysis-uncertainty summary,
+.analysis-sources summary { cursor: pointer; font-weight: 800; }
+.message-result-analysis .source-detail-list > div { border-top-color: rgba(102, 85, 27, 0.14); }
+
+@media (max-width: 380px) {
+  .tone-chip { padding-inline: 9px; font-size: 11px; }
+}

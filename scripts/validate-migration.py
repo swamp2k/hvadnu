@@ -21,8 +21,6 @@ expected_tables = {
     "current_state_supersedes",
     "case_source_fts",
     "ai_usage_events",
-    "legal_references",
-    "legal_reference_fts",
     "message_web_sources",
 }
 actual_tables = {
@@ -34,6 +32,25 @@ missing = expected_tables - actual_tables
 if missing:
     raise AssertionError(f"Missing migration tables: {sorted(missing)}")
 
+retired_objects = {
+    "legal_references",
+    "legal_reference_fts",
+    "trg_legal_references_fts_insert",
+    "trg_legal_references_fts_delete",
+    "trg_legal_references_fts_update",
+}
+remaining_retired_objects = {
+    row[0]
+    for row in connection.execute(
+        "SELECT name FROM sqlite_master WHERE name IN (?, ?, ?, ?, ?)",
+        tuple(sorted(retired_objects)),
+    )
+}
+if remaining_retired_objects:
+    raise AssertionError(
+        f"Retired local legal-library objects still exist: {sorted(remaining_retired_objects)}"
+    )
+
 source_columns = {row[1] for row in connection.execute("PRAGMA table_info(case_sources)")}
 for column in {"mime_type", "document_kind", "size_bytes", "character_count", "analysis_json"}:
     if column not in source_columns:
@@ -42,22 +59,6 @@ for column in {"mime_type", "document_kind", "size_bytes", "character_count", "a
 timeline_columns = {row[1] for row in connection.execute("PRAGMA table_info(case_timeline_events)")}
 if "source_occurred_at" not in timeline_columns:
     raise AssertionError("Missing source_occurred_at timeline column")
-
-legal_columns = {row[1] for row in connection.execute("PRAGMA table_info(legal_references)")}
-if "content_kind" not in legal_columns:
-    raise AssertionError("Legal references do not distinguish curated summaries from verbatim excerpts")
-legal_count = connection.execute("SELECT COUNT(*) FROM legal_references WHERE active = 1").fetchone()[0]
-if legal_count < 8:
-    raise AssertionError(f"Legal reference library was not populated: {legal_count}")
-if connection.execute("SELECT COUNT(*) FROM legal_references WHERE content_kind != 'curated_summary'").fetchone()[0] != 0:
-    raise AssertionError("Seeded legal text unexpectedly claims to be verbatim")
-legal_match = connection.execute("""
-    SELECT reference_id FROM legal_reference_fts
-    WHERE legal_reference_fts MATCH 'samvær'
-    LIMIT 1
-""").fetchone()
-if legal_match is None:
-    raise AssertionError("Legal reference FTS was not populated")
 
 connection.execute("INSERT INTO cases (id, created_at, updated_at) VALUES ('case-a', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')")
 connection.execute("INSERT INTO cases (id, created_at, updated_at) VALUES ('case-b', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')")
@@ -151,7 +152,5 @@ if connection.execute("SELECT COUNT(*) FROM ai_usage_events WHERE case_id = 'cas
     raise AssertionError("AI usage cascade failed")
 if connection.execute("SELECT COUNT(*) FROM case_source_fts WHERE case_id = 'case-a'").fetchone()[0] != 0:
     raise AssertionError("FTS cleanup trigger failed")
-if connection.execute("SELECT COUNT(*) FROM legal_references").fetchone()[0] != legal_count:
-    raise AssertionError("Deleting a case unexpectedly changed global legal references")
 
 print(f"D1 migration invariants validated across {len(migration_files)} migrations")
