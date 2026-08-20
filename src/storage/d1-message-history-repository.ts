@@ -88,8 +88,9 @@ export class D1MessageHistoryRepository {
       this.db.prepare(`SELECT c.source_id, c.text
         FROM case_source_chunks c
         JOIN case_sources s ON s.case_id = c.case_id AND s.id = c.source_id
-        WHERE c.case_id = ? AND s.source_type = 'message' AND c.chunk_index = 0`)
-        .bind(this.caseId).all<HistoryChunkRow>(),
+        WHERE c.case_id = ? AND s.source_type = 'message' AND c.chunk_index = 0
+        ORDER BY s.created_at DESC LIMIT ?`)
+        .bind(this.caseId, safeLimit).all<HistoryChunkRow>(),
     ]);
 
     const textBySource = new Map((chunkResult.results ?? []).map((row) => [row.source_id, row.text]));
