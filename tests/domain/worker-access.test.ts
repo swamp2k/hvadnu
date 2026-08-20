@@ -11,7 +11,9 @@ const readyEnv: WorkerEnv = {
 };
 
 function statusRequest(headers?: HeadersInit): Request {
-  return new Request('https://private.example.invalid/api/analysis-status', { method: 'GET', headers });
+  const init: RequestInit = { method: 'GET' };
+  if (headers) init.headers = headers;
+  return new Request('https://private.example.invalid/api/analysis-status', init);
 }
 
 describe('Worker Access context boundary', () => {
