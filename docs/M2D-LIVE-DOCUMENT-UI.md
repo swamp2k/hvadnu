@@ -35,9 +35,9 @@ Cloudflare Access is the single source of truth for who may use Hvad nu?. Do not
 The Worker supports both Cloudflare Access integration modes during the migration period:
 
 1. **Worker-native Access** — if `ctx.access` is present, the Worker resolves the user with `ctx.access.getIdentity()` and never uses a fallback.
-2. **Existing hostname/self-hosted Access** — if `ctx.access` is absent, the Worker requires both the Access assertion and `CF_Authorization` session cookie, then asks the reserved same-origin `/cdn-cgi/access/get-identity` endpoint to validate that session. Only a successful Access identity response is accepted.
+2. **Existing hostname/self-hosted Access** — if `ctx.access` is absent, the Worker takes the Access application token from `Cf-Access-Jwt-Assertion` and asks the reserved same-origin `/cdn-cgi/access/get-identity` endpoint to validate that token. Only a successful Access identity response is accepted.
 
-The application does not trust a copied email header. If Worker-native identity lookup fails, or the legacy Access identity endpoint rejects the session, analysis remains unavailable and the document body is not read or sent to Anthropic.
+The application does not trust a copied email header and does not forward unrelated browser cookies during fallback verification. If Worker-native identity lookup fails, or the legacy Access identity endpoint rejects the assertion, analysis remains unavailable and the document body is not read or sent to Anthropic.
 
 Changing who may use the application remains a Cloudflare Access policy operation only; no Worker user list or redeploy is needed for user changes.
 
