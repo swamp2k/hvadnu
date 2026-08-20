@@ -1,3 +1,4 @@
+import { createRemoteJWKSet, jwtVerify } from 'jose';
 import {
   handleDocumentAnalysisRequest,
   handleDocumentAnalysisStatusRequest,
@@ -14,7 +15,9 @@ interface WorkerAccessContext {
   };
 }
 
-type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+export type AccessJwtVerifier = (token: string, env: WorkerEnv) => Promise<string | null>;
+
+const jwksByTeamDomain = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
 function normalizedEmail(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -22,30 +25,34 @@ function normalizedEmail(value: unknown): string | null {
   return email ? email : null;
 }
 
-async function getLegacyAccessEmail(request: Request, fetchImpl: FetchLike): Promise<string | null> {
-  const assertion = request.headers.get('cf-access-jwt-assertion')?.trim();
-  if (!assertion) return null;
+function normalizedTeamDomain(value: string | undefined): string | null {
+  if (!value) return null;
+  const domain = value.trim().replace(/\/+$/u, '');
+  if (!domain.startsWith('https://')) return null;
+  return domain;
+}
 
-  const identityUrl = new URL(request.url);
-  identityUrl.pathname = '/cdn-cgi/access/get-identity';
-  identityUrl.search = '';
-  identityUrl.hash = '';
+function getJwks(teamDomain: string): ReturnType<typeof createRemoteJWKSet> {
+  const existing = jwksByTeamDomain.get(teamDomain);
+  if (existing) return existing;
+
+  const jwks = createRemoteJWKSet(new URL(`${teamDomain}/cdn-cgi/access/certs`));
+  jwksByTeamDomain.set(teamDomain, jwks);
+  return jwks;
+}
+
+export async function verifyClassicAccessJwt(token: string, env: WorkerEnv): Promise<string | null> {
+  const teamDomain = normalizedTeamDomain(env.TEAM_DOMAIN);
+  const audience = env.POLICY_AUD?.trim();
+  if (!teamDomain || !audience) return null;
 
   try {
-    const response = await fetchImpl(identityUrl, {
-      method: 'GET',
-      headers: {
-        accept: 'application/json',
-        cookie: `CF_Authorization=${assertion}`,
-      },
-      cache: 'no-store',
-      redirect: 'manual',
+    const { payload } = await jwtVerify(token, getJwks(teamDomain), {
+      issuer: teamDomain,
+      audience,
+      algorithms: ['RS256'],
     });
-    if (!response.ok) return null;
-
-    const identity: unknown = await response.json();
-    if (!identity || typeof identity !== 'object' || !('email' in identity)) return null;
-    return normalizedEmail(identity.email);
+    return normalizedEmail(payload.email);
   } catch {
     return null;
   }
@@ -53,8 +60,9 @@ async function getLegacyAccessEmail(request: Request, fetchImpl: FetchLike): Pro
 
 export async function resolveAccessEmail(
   request: Request,
+  env: WorkerEnv,
   ctx: WorkerAccessContext,
-  fetchImpl: FetchLike = fetch,
+  verifyJwt: AccessJwtVerifier = verifyClassicAccessJwt,
 ): Promise<string | null> {
   if (ctx.access) {
     try {
@@ -65,13 +73,16 @@ export async function resolveAccessEmail(
     }
   }
 
-  // Compatibility path for hostname/self-hosted Access applications created before
-  // Worker-native ctx.access. Access itself validates the application token at the
-  // reserved /cdn-cgi/access/get-identity endpoint on this same protected host.
-  return getLegacyAccessEmail(request, fetchImpl);
+  const assertion = request.headers.get('cf-access-jwt-assertion')?.trim();
+  if (!assertion) return null;
+
+  // Compatibility path for existing/self-hosted Access applications. Cloudflare's
+  // application token is verified cryptographically against the account signing keys,
+  // issuer and this application's audience before the request is trusted.
+  return verifyJwt(assertion, env);
 }
 
-export function createWorker(fetchImpl: FetchLike = fetch) {
+export function createWorker(verifyJwt: AccessJwtVerifier = verifyClassicAccessJwt) {
   return {
     async fetch(request: Request, env: WorkerEnv, ctx: WorkerAccessContext): Promise<Response> {
       const url = new URL(request.url);
@@ -86,11 +97,19 @@ export function createWorker(fetchImpl: FetchLike = fetch) {
       }
 
       if (url.pathname === '/api/analysis-status') {
-        return handleDocumentAnalysisStatusRequest(request, env, await resolveAccessEmail(request, ctx, fetchImpl));
+        return handleDocumentAnalysisStatusRequest(
+          request,
+          env,
+          await resolveAccessEmail(request, env, ctx, verifyJwt),
+        );
       }
 
       if (url.pathname === '/api/analyze-document') {
-        return handleDocumentAnalysisRequest(request, env, await resolveAccessEmail(request, ctx, fetchImpl));
+        return handleDocumentAnalysisRequest(
+          request,
+          env,
+          await resolveAccessEmail(request, env, ctx, verifyJwt),
+        );
       }
 
       return new Response('Not found', { status: 404 });
