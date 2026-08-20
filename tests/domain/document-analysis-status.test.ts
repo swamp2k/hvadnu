@@ -6,7 +6,6 @@ import {
 
 const readyEnv: WorkerEnv = {
   ANTHROPIC_API_KEY: 'synthetic-test-key',
-  ALLOWED_EMAIL: 'case-owner@example.invalid',
   DOCUMENT_ANALYSIS_ENABLED: 'true',
   PRIVATE_DEPLOYMENT_APPROVED: 'true',
   ANTHROPIC_ZDR_APPROVED: 'true',
@@ -18,21 +17,21 @@ function request(): Request {
 }
 
 describe('document analysis status endpoint', () => {
-  it('reports available only when the verified Access identity and runtime gate are ready', async () => {
-    const response = handleDocumentAnalysisStatusRequest(request(), readyEnv, 'case-owner@example.invalid');
+  it('reports available when Cloudflare Access authenticated the request and runtime gate is ready', async () => {
+    const response = handleDocumentAnalysisStatusRequest(request(), readyEnv, 'authorized-user@example.invalid');
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ available: true });
   });
 
   it('reports unavailable without exposing which runtime gate is missing', async () => {
     const { ANTHROPIC_API_KEY: _removed, ...envWithoutKey } = readyEnv;
-    const response = handleDocumentAnalysisStatusRequest(request(), envWithoutKey, 'case-owner@example.invalid');
+    const response = handleDocumentAnalysisStatusRequest(request(), envWithoutKey, 'authorized-user@example.invalid');
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ available: false });
   });
 
-  it('does not reveal status to a different verified Access identity', async () => {
-    const response = handleDocumentAnalysisStatusRequest(request(), readyEnv, 'other@example.invalid');
+  it('does not reveal status without a verified Access identity', async () => {
+    const response = handleDocumentAnalysisStatusRequest(request(), readyEnv, null);
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ available: false });
   });

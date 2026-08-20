@@ -11,7 +11,6 @@ export const MAX_ANALYSIS_REQUEST_CHARACTERS = 600_000;
 
 export interface WorkerEnv {
   ANTHROPIC_API_KEY?: string;
-  ALLOWED_EMAIL?: string;
   DOCUMENT_ANALYSIS_ENABLED?: string;
   PRIVATE_DEPLOYMENT_APPROVED?: string;
   ANTHROPIC_ZDR_APPROVED?: string;
@@ -45,10 +44,8 @@ export function buildRuntimeGate(env: WorkerEnv, authenticated: boolean): Docume
   };
 }
 
-export function isAuthorizedAccessIdentity(authenticatedEmail: string | null | undefined, env: WorkerEnv): boolean {
-  const allowed = env.ALLOWED_EMAIL?.trim().toLowerCase();
-  const authenticated = authenticatedEmail?.trim().toLowerCase();
-  return Boolean(allowed && authenticated && allowed === authenticated);
+export function isAuthenticatedAccessIdentity(authenticatedEmail: string | null | undefined): boolean {
+  return Boolean(authenticatedEmail?.trim());
 }
 
 export function handleDocumentAnalysisStatusRequest(
@@ -58,7 +55,7 @@ export function handleDocumentAnalysisStatusRequest(
 ): Response {
   if (request.method !== 'GET') return json({ error: 'method_not_allowed' }, 405);
 
-  const authenticated = isAuthorizedAccessIdentity(authenticatedEmail, env);
+  const authenticated = isAuthenticatedAccessIdentity(authenticatedEmail);
   if (!authenticated) return json({ available: false }, 401);
 
   const gate = buildRuntimeGate(env, authenticated);
@@ -74,7 +71,7 @@ export async function handleDocumentAnalysisRequest(
 ): Promise<Response> {
   if (request.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
 
-  const authenticated = isAuthorizedAccessIdentity(authenticatedEmail, env);
+  const authenticated = isAuthenticatedAccessIdentity(authenticatedEmail);
   if (!authenticated) return json({ error: 'unauthorized' }, 401);
 
   const gate = buildRuntimeGate(env, authenticated);

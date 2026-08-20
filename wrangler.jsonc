@@ -21,6 +21,6 @@
     "PAYLOAD_LOGGING_DISABLED": "true"
   },
   "secrets": {
-    "required": ["ANTHROPIC_API_KEY", "ALLOWED_EMAIL"]
+    "required": ["ANTHROPIC_API_KEY"]
   }
 }

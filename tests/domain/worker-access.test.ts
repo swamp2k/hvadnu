@@ -4,7 +4,6 @@ import type { WorkerEnv } from '../../src/server/document-analysis-endpoint';
 
 const readyEnv: WorkerEnv = {
   ANTHROPIC_API_KEY: 'synthetic-test-key',
-  ALLOWED_EMAIL: 'case-owner@example.invalid',
   DOCUMENT_ANALYSIS_ENABLED: 'true',
   PRIVATE_DEPLOYMENT_APPROVED: 'true',
   ANTHROPIC_ZDR_APPROVED: 'true',
@@ -16,10 +15,10 @@ function statusRequest(): Request {
 }
 
 describe('Worker Access context boundary', () => {
-  it('uses the verified ctx.access identity for analysis status', async () => {
+  it('accepts an identity already authorized by Cloudflare Access', async () => {
     const response = await worker.fetch(statusRequest(), readyEnv, {
       access: {
-        getIdentity: async () => ({ email: 'case-owner@example.invalid' }),
+        getIdentity: async () => ({ email: 'authorized-user@example.invalid' }),
       },
     });
     expect(response.status).toBe(200);
@@ -28,6 +27,14 @@ describe('Worker Access context boundary', () => {
 
   it('fails closed when the Worker has no verified Access context', async () => {
     const response = await worker.fetch(statusRequest(), readyEnv, {});
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ available: false });
+  });
+
+  it('fails closed when Access context exists but no identity can be resolved', async () => {
+    const response = await worker.fetch(statusRequest(), readyEnv, {
+      access: { getIdentity: async () => null },
+    });
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ available: false });
   });

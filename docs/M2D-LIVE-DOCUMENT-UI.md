@@ -22,26 +22,27 @@ The repository records these approved non-secret gates as `true` in `wrangler.js
 - `ANTHROPIC_ZDR_APPROVED`
 - `PAYLOAD_LOGGING_DISABLED`
 
-The Worker also requires both runtime secrets:
+The only application runtime secret required by this milestone is:
 
 - `ANTHROPIC_API_KEY`
-- `ALLOWED_EMAIL`
 
-They are declared in `wrangler.jsonc` as `secrets.required`. Current Wrangler validates required secrets during a real deploy, so production deployment fails closed if either is missing. Neither value belongs in Git.
+It is declared in `wrangler.jsonc` as `secrets.required`. A production deploy therefore fails closed if the Anthropic key is missing. The value never belongs in Git.
 
-Store `ALLOWED_EMAIL` as a Cloudflare secret too even though it is not a credential; this keeps the case user's identity out of the public repository. Secrets are preserved across normal Wrangler deploys. `keep_vars=true` also remains enabled so other dashboard/runtime-only variables are not erased by GitHub-driven deploys.
+## Authentication and authorization boundary
 
-## Authentication boundary
+Cloudflare Access is the single source of truth for who may use Hvad nu?. Do not maintain a second user/email allowlist inside the Worker.
 
-The Worker does not trust an identity copied from a request header. It reads the authenticated user from Cloudflare's Worker-native Access context with `ctx.access.getIdentity()` and passes only that verified email into the document-analysis boundary.
+The Worker does not trust identity headers supplied on the request. It resolves the authenticated identity from Cloudflare's Worker-native Access context with `ctx.access.getIdentity()`.
 
-If `ctx.access` is absent, identity lookup fails, or the verified email does not exactly match `ALLOWED_EMAIL`, document analysis remains unavailable and no source text is read or sent to Anthropic.
+Any identity already authorized by the Cloudflare Access policy is accepted by the application. If `ctx.access` is absent, identity lookup fails, or no identity email can be resolved, document analysis remains unavailable and no source text is read or sent to Anthropic.
+
+Changing who may use the application is therefore a Cloudflare Access policy operation only; no Worker secret or redeploy is needed for user changes.
 
 ## Status endpoint
 
 `GET /api/analysis-status`
 
-- requires the exact verified Cloudflare Access identity / `ALLOWED_EMAIL` match;
+- requires a verified Cloudflare Access identity;
 - never constructs an Anthropic client;
 - never reads a document body;
 - returns only `{ "available": true|false }`;
@@ -59,13 +60,10 @@ The existing limits, ZDR decision, source-status protections, no-payload-logging
 
 ## First production activation
 
-Before the first successful M2d production deploy:
-
 1. configure `ANTHROPIC_API_KEY` directly in Cloudflare as a secret;
-2. configure `ALLOWED_EMAIL` directly in Cloudflare as a secret;
-3. merge/deploy M2d; Wrangler will reject the deployment if either required secret is absent;
-4. open the protected app as that Access user;
-5. confirm the document action becomes enabled;
-6. run one synthetic document end-to-end;
-7. inspect Cloudflare logs/observability for metadata only — no case text, prompts, or model response payloads;
-8. only then use real case material.
+2. merge/deploy M2d; Wrangler rejects the deployment if the required Anthropic secret is absent;
+3. open the protected app as any user permitted by the Cloudflare Access policy;
+4. confirm the document action becomes enabled;
+5. run one synthetic document end-to-end;
+6. inspect Cloudflare logs/observability for metadata only — no case text, prompts, or model response payloads;
+7. only then use real case material.
