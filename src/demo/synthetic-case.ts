@@ -27,10 +27,10 @@ export const DEMO_SOURCES: Record<string, DemoSource> = {
   },
 };
 
-export const DEMO_MESSAGES = {
+export const DEMO_MESSAGES: Record<'changedPickup' | 'scoutCamp', string> = {
   changedPickup: 'Vi har aftalt, at jeg har dem fra torsdag nu. Jeg henter dem kl. 16, uanset om du kan lide det eller ej.',
   scoutCamp: 'Børnene skal på spejderlejr den weekend, så jeg aflyser dit samvær. Det må jeg godt.',
-} as const;
+};
 
 export function citationsFor(sourceIds: string[]): MessageCitation[] {
   return sourceIds
