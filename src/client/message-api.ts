@@ -7,17 +7,36 @@ export class MessageApiError extends Error {
   }
 }
 
-export async function analyzeMessage(message: string): Promise<{ analysis: MessageAnalysisResult; historySaved: boolean }> {
+export interface MessageWebSearchStatus {
+  requested: boolean;
+  used: boolean;
+  sourceCount: number;
+  failed: boolean;
+}
+
+export async function analyzeMessage(
+  message: string,
+  options: { webSearch?: boolean } = {},
+): Promise<{ analysis: MessageAnalysisResult; historySaved: boolean; webSearch: MessageWebSearchStatus }> {
   const response = await fetch('/api/analyze-message', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, webSearch: options.webSearch === true }),
   });
   if (!response.ok) throw new MessageApiError(response.status, 'Beskeden kunne ikke analyseres.');
-  const raw = await response.json() as { analysis?: unknown; historySaved?: unknown };
+  const raw = await response.json() as { analysis?: unknown; historySaved?: unknown; webSearch?: Partial<MessageWebSearchStatus> };
   const analysis = MessageAnalysisResultSchema.parse(raw.analysis);
   if (analysis.mode !== 'model_analysis') throw new MessageApiError(502, 'Serveren returnerede ikke en produktionsanalyse.');
-  return { analysis, historySaved: raw.historySaved === true };
+  return {
+    analysis,
+    historySaved: raw.historySaved === true,
+    webSearch: {
+      requested: raw.webSearch?.requested === true,
+      used: raw.webSearch?.used === true,
+      sourceCount: typeof raw.webSearch?.sourceCount === 'number' ? raw.webSearch.sourceCount : 0,
+      failed: raw.webSearch?.failed === true,
+    },
+  };
 }
 
 export async function getMessageHistory(): Promise<MessageHistoryEntry[]> {

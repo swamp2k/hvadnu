@@ -5,6 +5,8 @@ import type { D1Database } from './d1-types';
 const MAX_CONTEXT_CHARACTERS = 12_000;
 const MAX_RELEVANT_CHUNKS = 12;
 const FALLBACK_RECENT_CHUNKS = 6;
+const MAX_LEGAL_CONTEXT_CHARACTERS = 7_000;
+const MAX_LEGAL_REFERENCES = 6;
 const MAX_HISTORY_ENTRIES = 50;
 const STOP_WORDS = new Set([
   'den', 'det', 'der', 'som', 'for', 'fra', 'med', 'til', 'har', 'kan', 'skal', 'vil', 'jeg', 'mig', 'min', 'mit', 'mine',
@@ -32,13 +34,25 @@ interface ContextRow {
   text: string;
 }
 
+interface LegalContextRow {
+  reference_id: string;
+  title: string;
+  authority: string;
+  source_url: string;
+  locator: string;
+  source_type: 'law' | 'official_guidance' | 'court_guidance';
+  content_kind: 'curated_summary' | 'verbatim_excerpt';
+  version_label: string;
+  text: string;
+}
+
 export interface MessageContextSource {
   sourceId: string;
   label: string;
   sourceType: string;
   locator: string;
   text: string;
-  status: 'unknown';
+  status: 'current' | 'unknown';
 }
 
 export interface MessageAnalysisContext {
@@ -83,10 +97,50 @@ function rowsToSources(rows: ContextRow[]): MessageContextSource[] {
   return sources;
 }
 
+function legalRowsToSources(rows: LegalContextRow[]): MessageContextSource[] {
+  const sources: MessageContextSource[] = [];
+  let used = 0;
+  for (const row of rows) {
+    if (used >= MAX_LEGAL_CONTEXT_CHARACTERS) break;
+    const contentKind = row.content_kind === 'verbatim_excerpt'
+      ? 'ordret uddrag'
+      : 'kurateret resumé af den linkede officielle kilde; ikke ordret lovtekst';
+    const remaining = MAX_LEGAL_CONTEXT_CHARACTERS - used;
+    const text = `Indholdstype: ${contentKind}. Version: ${row.version_label}. Kildepunkt: ${row.locator}. ${row.text}`.slice(0, remaining);
+    if (!text.trim()) continue;
+    sources.push({
+      sourceId: `legal:${row.reference_id}`,
+      label: `${row.authority}: ${row.title} — ${row.locator}`,
+      sourceType: `legal_${row.source_type}_${row.content_kind}`,
+      locator: row.source_url,
+      text,
+      status: 'current',
+    });
+    used += text.length;
+  }
+  return sources;
+}
+
+function validWebSource(source: MessageContextSource): boolean {
+  if (source.sourceType !== 'web_official' && source.sourceType !== 'web_secondary') return false;
+  if (!source.sourceId.startsWith('web:') || !source.text.trim()) return false;
+  try {
+    const url = new URL(source.locator);
+    return url.protocol === 'https:' || url.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
 export class D1MessageHistoryRepository {
   constructor(private readonly db: D1Database, private readonly caseId = PRIMARY_CASE_ID) {}
 
-  async saveAnalyzedMessage(message: string, analysis: MessageAnalysisResult, sourceId = crypto.randomUUID()): Promise<{ sourceId: string; eventId: string }> {
+  async saveAnalyzedMessage(
+    message: string,
+    analysis: MessageAnalysisResult,
+    sourceId = crypto.randomUUID(),
+    webSources: MessageContextSource[] = [],
+  ): Promise<{ sourceId: string; eventId: string }> {
     const cleanMessage = message.trim();
     if (!cleanMessage) throw new Error('empty_message');
     if (analysis.mode !== 'model_analysis') throw new Error('model_analysis_required');
@@ -95,6 +149,10 @@ export class D1MessageHistoryRepository {
     const eventId = crypto.randomUUID();
     const hash = await sha256Hex(cleanMessage);
     const label = `Besked analyseret ${new Date(now).toLocaleDateString('da-DK')}`;
+    const validWebSources = webSources.filter(validWebSource);
+    if (new Set(validWebSources.map((source) => source.sourceId)).size !== validWebSources.length) {
+      throw new Error('duplicate_web_source_id');
+    }
 
     const statements = [
       this.db.prepare('INSERT OR IGNORE INTO cases (id, created_at, updated_at) VALUES (?, ?, ?)').bind(this.caseId, now, now),
@@ -108,6 +166,10 @@ export class D1MessageHistoryRepository {
         case_id, source_id, chunk_index, page_number, text
       ) VALUES (?, ?, 0, NULL, ?)`)
         .bind(this.caseId, sourceId, cleanMessage),
+      ...validWebSources.map((source) => this.db.prepare(`INSERT INTO message_web_sources (
+          case_id, message_source_id, source_id, url, title, source_type, cited_text, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+        .bind(this.caseId, sourceId, source.sourceId, source.locator, source.label, source.sourceType, source.text, now)),
       this.db.prepare(`INSERT INTO case_timeline_events (
         id, case_id, occurred_at, source_occurred_at, kind, topic, title, summary, disputed, created_at
       ) VALUES (?, ?, ?, NULL, 'message', 'message_analysis', 'Analyseret besked', ?, 0, ?)`)
@@ -156,6 +218,7 @@ export class D1MessageHistoryRepository {
     const snapshot = await new D1CaseRepository(this.db, this.caseId).getSnapshot();
     const query = ftsQueryForMessage(message);
     let rows: ContextRow[] = [];
+    let legalRows: LegalContextRow[] = [];
 
     if (query) {
       try {
@@ -174,6 +237,21 @@ export class D1MessageHistoryRepository {
       } catch {
         // Before the FTS migration is promoted, safely fall back to a small recent window.
       }
+
+      try {
+        const legalResult = await this.db.prepare(`SELECT
+            l.id AS reference_id, l.title, l.authority, l.source_url, l.locator,
+            l.source_type, l.content_kind, l.version_label, l.text
+          FROM legal_reference_fts
+          JOIN legal_references l ON l.id = legal_reference_fts.reference_id
+          WHERE legal_reference_fts MATCH ? AND l.active = 1
+          ORDER BY bm25(legal_reference_fts), l.priority ASC
+          LIMIT ?`)
+          .bind(query, MAX_LEGAL_REFERENCES).all<LegalContextRow>();
+        legalRows = legalResult.results ?? [];
+      } catch {
+        // Legal-reference migration may not yet be present during branch preview/deploy staging.
+      }
     }
 
     if (rows.length === 0) {
@@ -187,6 +265,6 @@ export class D1MessageHistoryRepository {
       rows = fallback.results ?? [];
     }
 
-    return { currentState: snapshot.currentState, sources: rowsToSources(rows) };
+    return { currentState: snapshot.currentState, sources: [...rowsToSources(rows), ...legalRowsToSources(legalRows)] };
   }
 }

@@ -21,6 +21,9 @@ expected_tables = {
     "current_state_supersedes",
     "case_source_fts",
     "ai_usage_events",
+    "legal_references",
+    "legal_reference_fts",
+    "message_web_sources",
 }
 actual_tables = {
     row[0]
@@ -40,16 +43,38 @@ timeline_columns = {row[1] for row in connection.execute("PRAGMA table_info(case
 if "source_occurred_at" not in timeline_columns:
     raise AssertionError("Missing source_occurred_at timeline column")
 
+legal_columns = {row[1] for row in connection.execute("PRAGMA table_info(legal_references)")}
+if "content_kind" not in legal_columns:
+    raise AssertionError("Legal references do not distinguish curated summaries from verbatim excerpts")
+legal_count = connection.execute("SELECT COUNT(*) FROM legal_references WHERE active = 1").fetchone()[0]
+if legal_count < 8:
+    raise AssertionError(f"Legal reference library was not populated: {legal_count}")
+if connection.execute("SELECT COUNT(*) FROM legal_references WHERE content_kind != 'curated_summary'").fetchone()[0] != 0:
+    raise AssertionError("Seeded legal text unexpectedly claims to be verbatim")
+legal_match = connection.execute("""
+    SELECT reference_id FROM legal_reference_fts
+    WHERE legal_reference_fts MATCH 'samvær'
+    LIMIT 1
+""").fetchone()
+if legal_match is None:
+    raise AssertionError("Legal reference FTS was not populated")
+
 connection.execute("INSERT INTO cases (id, created_at, updated_at) VALUES ('case-a', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')")
 connection.execute("INSERT INTO cases (id, created_at, updated_at) VALUES ('case-b', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')")
 connection.execute("""
     INSERT INTO case_sources (
         id, case_id, source_type, label, occurred_at, immutable_sha256,
         mime_type, document_kind, size_bytes, character_count, analysis_json, created_at
-    ) VALUES ('source-a', 'case-a', 'document', 'Synthetic source', NULL, 'hash',
-              'text/plain', 'text', 10, 10, '{}', '2026-01-01T00:00:00Z')
+    ) VALUES ('source-a', 'case-a', 'message', 'Synthetic source', NULL, 'hash',
+              'text/plain', 'message', 10, 10, '{}', '2026-01-01T00:00:00Z')
 """)
-connection.execute("INSERT INTO case_source_chunks (case_id, source_id, chunk_index, page_number, text) VALUES ('case-a', 'source-a', 0, 1, 'synthetic samvaer torsdag text')")
+connection.execute("INSERT INTO case_source_chunks (case_id, source_id, chunk_index, page_number, text) VALUES ('case-a', 'source-a', 0, NULL, 'synthetic samvaer torsdag text')")
+connection.execute("""
+    INSERT INTO message_web_sources (
+        case_id, message_source_id, source_id, url, title, source_type, cited_text, created_at
+    ) VALUES ('case-a', 'source-a', 'web:1', 'https://www.domstol.dk/synthetic',
+              'Synthetic official source', 'web_official', 'Synthetic cited public text', '2026-01-01T00:00:00Z')
+""")
 connection.execute("""
     INSERT INTO case_timeline_events (
         id, case_id, occurred_at, source_occurred_at, kind, topic, title, summary, disputed, created_at
@@ -71,6 +96,14 @@ connection.execute("""
         latency_ms, context_characters, created_at
     ) VALUES ('usage-a', 'case-a', 'message_analysis', 'claude-sonnet-5', 'medium',
               100, 20, 0, 0, 5, 10, 200, '2026-01-01T00:00:00Z')
+""")
+connection.execute("""
+    INSERT INTO ai_usage_events (
+        id, case_id, task_type, model, effort, input_tokens, output_tokens,
+        cache_creation_input_tokens, cache_read_input_tokens, thinking_tokens,
+        latency_ms, context_characters, created_at
+    ) VALUES ('usage-web', 'case-a', 'web_research', 'claude-sonnet-5', 'medium',
+              120, 10, 0, 0, 0, 12, 240, '2026-01-01T00:00:00Z')
 """)
 
 try:
@@ -112,9 +145,13 @@ if connection.execute("SELECT COUNT(*) FROM case_sources WHERE case_id = 'case-a
     raise AssertionError("Case source cascade failed")
 if connection.execute("SELECT COUNT(*) FROM case_source_chunks WHERE case_id = 'case-a'").fetchone()[0] != 0:
     raise AssertionError("Source chunk cascade failed")
+if connection.execute("SELECT COUNT(*) FROM message_web_sources WHERE case_id = 'case-a'").fetchone()[0] != 0:
+    raise AssertionError("Web evidence cascade failed")
 if connection.execute("SELECT COUNT(*) FROM ai_usage_events WHERE case_id = 'case-a'").fetchone()[0] != 0:
     raise AssertionError("AI usage cascade failed")
 if connection.execute("SELECT COUNT(*) FROM case_source_fts WHERE case_id = 'case-a'").fetchone()[0] != 0:
     raise AssertionError("FTS cleanup trigger failed")
+if connection.execute("SELECT COUNT(*) FROM legal_references").fetchone()[0] != legal_count:
+    raise AssertionError("Deleting a case unexpectedly changed global legal references")
 
 print(f"D1 migration invariants validated across {len(migration_files)} migrations")

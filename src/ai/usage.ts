@@ -1,4 +1,4 @@
-export type AiTaskType = 'message_analysis' | 'message_review' | 'document_analysis';
+export type AiTaskType = 'message_analysis' | 'message_review' | 'document_analysis' | 'web_research';
 export type AiEffort = 'medium' | 'high';
 
 export interface AiUsageMetadata {
