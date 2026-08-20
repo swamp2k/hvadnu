@@ -67,18 +67,33 @@ function payloadFor(id: string, highUncertainty = true) {
   };
 }
 
+function usage(taskType: 'message_analysis' | 'message_review', effort: 'medium' | 'high') {
+  return {
+    taskType,
+    model: 'claude-sonnet-5' as const,
+    effort,
+    inputTokens: 100,
+    outputTokens: 20,
+    cacheCreationInputTokens: 0,
+    cacheReadInputTokens: 0,
+    thinkingTokens: 5,
+    latencyMs: 10,
+    contextCharacters: 200,
+  };
+}
+
 function providerFor(sourceId: (context: Parameters<MessageAnalysisProvider['analyze']>[0]['context']) => string, highUncertainty = true): MessageAnalysisProvider {
   return {
     async analyze({ context }) {
-      return payloadFor(sourceId(context), highUncertainty);
+      return { payload: payloadFor(sourceId(context), highUncertainty), usage: usage('message_analysis', 'medium') };
     },
     async review({ context }) {
-      return payloadFor(sourceId(context), false);
+      return { payload: payloadFor(sourceId(context), false), usage: usage('message_review', 'high') };
     },
   };
 }
 
-describe('M3c live message analysis', () => {
+describe('M3d efficient live message analysis', () => {
   it('fails closed before D1/provider work without Access identity', async () => {
     const db = new FakeDb();
     let constructed = false;
@@ -91,47 +106,66 @@ describe('M3c live message analysis', () => {
     expect(db.statements).toHaveLength(0);
   });
 
-  it('uses the incoming message real source ID, performs high-uncertainty review, and persists history', async () => {
+  it('does not pay for a second Sonnet pass merely because evidence is uncertain or samvær is mentioned', async () => {
     const db = new FakeDb();
-    const response = await handleMessageAnalysisRequest(request(), env(db), 'user@example.invalid', () =>
-      providerFor((context) => context.sources[0]!.sourceId));
+    let reviewCalled = false;
+    const base = providerFor((context) => context.sources[0]!.sourceId, true);
+    const response = await handleMessageAnalysisRequest(
+      request('Kan vi bytte samværsweekend denne ene gang?'),
+      env(db),
+      'user@example.invalid',
+      () => ({
+        ...base,
+        async review(input) {
+          reviewCalled = true;
+          return base.review(input);
+        },
+      }),
+    );
     expect(response.status).toBe(200);
     const body = await response.json() as {
       historySaved: boolean;
       sourceId: string;
-      analysis: { mode: string; reviewPlan: { passes: number; humanReviewRecommended: boolean }; citations: Array<{ sourceId: string }> };
+      analysis: { reviewPlan: { passes: number }; citations: Array<{ sourceId: string }> };
     };
     expect(body.historySaved).toBe(true);
-    expect(body.analysis.mode).toBe('model_analysis');
-    expect(body.analysis.reviewPlan.passes).toBe(2);
-    expect(body.analysis.reviewPlan.humanReviewRecommended).toBe(true);
-    expect(body.analysis.citations[0]?.sourceId).toBe(body.sourceId);
-    expect(db.batches).toHaveLength(1);
-    expect(db.batches[0]?.some((statement) => statement.query.includes("'message'"))).toBe(true);
-  });
-
-  it('keeps ordinary messages to one Sonnet pass', async () => {
-    const db = new FakeDb();
-    let reviewCalled = false;
-    const base = providerFor((context) => context.sources[0]!.sourceId, false);
-    const response = await handleMessageAnalysisRequest(request(), env(db), 'user@example.invalid', () => ({
-      ...base,
-      async review(input) {
-        reviewCalled = true;
-        return base.review(input);
-      },
-    }));
-    expect(response.status).toBe(200);
-    const body = await response.json() as { analysis: { reviewPlan: { passes: number } } };
     expect(body.analysis.reviewPlan.passes).toBe(1);
     expect(reviewCalled).toBe(false);
+    expect(body.analysis.citations[0]?.sourceId).toBe(body.sourceId);
+    expect(db.batches.some((batch) => batch.some((statement) => statement.query.includes('ai_usage_events')))).toBe(true);
+    expect(db.batches.some((batch) => batch.some((statement) => statement.query.includes("'message'")))).toBe(true);
   });
 
-  it('rejects fabricated source IDs and does not persist them', async () => {
+  it('uses a high-effort second pass for materially risky uncertain samvær changes', async () => {
+    const db = new FakeDb();
+    let reviewCalled = false;
+    const base = providerFor((context) => context.sources[0]!.sourceId, true);
+    const response = await handleMessageAnalysisRequest(
+      request('Jeg stopper samvær fra næste weekend. Hvad skal jeg svare?'),
+      env(db),
+      'user@example.invalid',
+      () => ({
+        ...base,
+        async review(input) {
+          reviewCalled = true;
+          return base.review(input);
+        },
+      }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json() as { analysis: { reviewPlan: { passes: number; humanReviewRecommended: boolean } } };
+    expect(body.analysis.reviewPlan.passes).toBe(2);
+    expect(body.analysis.reviewPlan.humanReviewRecommended).toBe(true);
+    expect(reviewCalled).toBe(true);
+    const telemetryWrites = db.batches.filter((batch) => batch.some((statement) => statement.query.includes('ai_usage_events')));
+    expect(telemetryWrites).toHaveLength(2);
+  });
+
+  it('rejects fabricated source IDs and does not persist message history', async () => {
     const db = new FakeDb();
     const response = await handleMessageAnalysisRequest(request(), env(db), 'user@example.invalid', () =>
       providerFor(() => 'invented-source'));
     expect(response.status).toBe(502);
-    expect(db.batches).toHaveLength(0);
+    expect(db.batches.some((batch) => batch.some((statement) => statement.query.includes("'message'")))).toBe(false);
   });
 });

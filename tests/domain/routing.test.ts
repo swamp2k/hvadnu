@@ -17,6 +17,18 @@ describe('buildReviewPlan', () => {
     });
   });
 
+  it('does not spend a second pass on uncertainty or missing evidence alone', () => {
+    const plan = buildReviewPlan({
+      riskLevel: 'medium',
+      legalUncertainty: 'high',
+      evidenceSufficiency: 'insufficient',
+      conflictingSources: false,
+      bindingDeadlineDetected: false,
+    });
+    expect(plan.passes).toBe(1);
+    expect(plan.humanReviewRecommended).toBe(false);
+  });
+
   it('uses a second Sonnet pass when sources conflict', () => {
     const plan = buildReviewPlan({
       riskLevel: 'medium',

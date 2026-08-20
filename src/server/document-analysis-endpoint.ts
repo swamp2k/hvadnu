@@ -1,4 +1,5 @@
 import { ExtractedDocumentSchema } from '../domain/document';
+import { D1AiUsageRepository } from '../storage/d1-ai-usage-repository';
 import type { D1Database } from '../storage/d1-types';
 import {
   createDocumentAnalysisService,
@@ -102,8 +103,15 @@ export async function handleDocumentAnalysisRequest(
   try {
     const provider = providerFactory(env.ANTHROPIC_API_KEY!);
     const service = createDocumentAnalysisService(gate, provider);
-    const analysis = await service.analyze(documentResult.data);
-    return json({ analysis });
+    const result = await service.analyze(documentResult.data);
+    if (env.DB) {
+      try {
+        await new D1AiUsageRepository(env.DB).record(result.usage);
+      } catch {
+        // Metadata telemetry must never make a valid document analysis unavailable.
+      }
+    }
+    return json({ analysis: result.analysis });
   } catch (error) {
     // Never log request/document/model payloads here. Production observability must remain metadata-only.
     const name = error instanceof Error ? error.name : 'UnknownError';

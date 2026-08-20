@@ -1,4 +1,5 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { handleAiUsageRequest } from './ai-usage-endpoint';
 import {
   handleCaseDeleteRequest,
   handleCaseExportRequest,
@@ -112,6 +113,10 @@ export function createWorker(verifyJwt: AccessJwtVerifier = verifyClassicAccessJ
 
       if (url.pathname === '/api/analyze-message') {
         return handleMessageAnalysisRequest(request, env, accessEmail);
+      }
+
+      if (url.pathname === '/api/ai-usage') {
+        return handleAiUsageRequest(request, env.DB, accessEmail);
       }
 
       if (url.pathname === '/api/case') {

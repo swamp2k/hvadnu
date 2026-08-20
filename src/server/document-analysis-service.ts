@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { buildDocumentAnalysisPrompt, type DocumentAnalysisPromptEnvelope } from '../ai/document-analysis-prompt';
+import type { AiUsageMetadata } from '../ai/usage';
 import {
   DocumentExplanationPayloadSchema,
   DocumentExplanationSchema,
@@ -6,7 +8,6 @@ import {
   type DocumentExplanation,
   type ExtractedDocument,
 } from '../domain/document';
-import { buildDocumentAnalysisPrompt, type DocumentAnalysisPromptEnvelope } from '../ai/document-analysis-prompt';
 
 export const DOCUMENT_ANALYSIS_MODEL = 'claude-sonnet-5' as const;
 export const MAX_SINGLE_DOCUMENT_ANALYSIS_CHARACTERS = 120_000;
@@ -51,7 +52,7 @@ export interface DocumentAnalysisProvider {
   analyze(args: {
     model: typeof DOCUMENT_ANALYSIS_MODEL;
     prompt: DocumentAnalysisPromptEnvelope;
-  }): Promise<unknown>;
+  }): Promise<{ payload: unknown; usage: AiUsageMetadata }>;
 }
 
 export class DocumentAnalysisBlockedError extends Error {
@@ -72,7 +73,7 @@ export class DocumentRequiresChunkingError extends Error {
 }
 
 export interface DocumentAnalysisService {
-  analyze(document: ExtractedDocument): Promise<DocumentExplanation>;
+  analyze(document: ExtractedDocument): Promise<{ analysis: DocumentExplanation; usage: AiUsageMetadata }>;
 }
 
 function constrainSingleDocumentStatus(payload: z.infer<typeof DocumentExplanationPayloadSchema>) {
@@ -99,21 +100,22 @@ export function createDocumentAnalysisService(
       const evaluation = evaluateDocumentAnalysisGate(gate);
       if (!evaluation.allowed) throw new DocumentAnalysisBlockedError(evaluation.blockers);
 
-      // Treat all future client/runtime document metadata as untrusted. Validate the
-      // structure and derive the actual model payload size from source text here.
       const document = ExtractedDocumentSchema.parse(documentInput);
       const actualCharacterCount = document.pages.reduce((sum, page) => sum + page.text.length, 0);
       if (actualCharacterCount > MAX_SINGLE_DOCUMENT_ANALYSIS_CHARACTERS) {
         throw new DocumentRequiresChunkingError(actualCharacterCount);
       }
 
-      const raw = await provider.analyze({
+      const providerResult = await provider.analyze({
         model: DOCUMENT_ANALYSIS_MODEL,
         prompt: buildDocumentAnalysisPrompt(document),
       });
 
-      const payload = constrainSingleDocumentStatus(DocumentExplanationPayloadSchema.parse(raw));
-      return DocumentExplanationSchema.parse({ mode: 'model_analysis', ...payload });
+      const payload = constrainSingleDocumentStatus(DocumentExplanationPayloadSchema.parse(providerResult.payload));
+      return {
+        analysis: DocumentExplanationSchema.parse({ mode: 'model_analysis', ...payload }),
+        usage: providerResult.usage,
+      };
     },
   };
 }
