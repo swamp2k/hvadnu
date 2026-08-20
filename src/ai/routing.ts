@@ -29,7 +29,8 @@ export function buildReviewPlan(context: ReviewContext): ReviewPlan {
     context.riskLevel === 'critical' ||
     context.legalUncertainty === 'high' ||
     context.evidenceSufficiency === 'insufficient' ||
-    context.conflictingSources;
+    context.conflictingSources ||
+    context.bindingDeadlineDetected;
 
   if (context.riskLevel === 'high' || context.riskLevel === 'critical') {
     reasons.push('high-risk outcome');
