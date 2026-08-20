@@ -10,6 +10,7 @@ import {
   handleDocumentAnalysisStatusRequest,
   type WorkerEnv,
 } from './document-analysis-endpoint';
+import { handleMessageAnalysisRequest, handleMessageHistoryRequest } from './message-analysis-endpoint';
 
 interface AccessIdentity {
   email?: string;
@@ -99,52 +100,38 @@ export function createWorker(verifyJwt: AccessJwtVerifier = verifyClassicAccessJ
         });
       }
 
+      const accessEmail = await resolveAccessEmail(request, env, ctx, verifyJwt);
+
       if (url.pathname === '/api/analysis-status') {
-        return handleDocumentAnalysisStatusRequest(
-          request,
-          env,
-          await resolveAccessEmail(request, env, ctx, verifyJwt),
-        );
+        return handleDocumentAnalysisStatusRequest(request, env, accessEmail);
       }
 
       if (url.pathname === '/api/analyze-document') {
-        return handleDocumentAnalysisRequest(
-          request,
-          env,
-          await resolveAccessEmail(request, env, ctx, verifyJwt),
-        );
+        return handleDocumentAnalysisRequest(request, env, accessEmail);
+      }
+
+      if (url.pathname === '/api/analyze-message') {
+        return handleMessageAnalysisRequest(request, env, accessEmail);
       }
 
       if (url.pathname === '/api/case') {
-        return handleCaseSnapshotRequest(
-          request,
-          env.DB,
-          await resolveAccessEmail(request, env, ctx, verifyJwt),
-        );
+        return handleCaseSnapshotRequest(request, env.DB, accessEmail);
       }
 
       if (url.pathname === '/api/case/import-document') {
-        return handleCaseImportDocumentRequest(
-          request,
-          env.DB,
-          await resolveAccessEmail(request, env, ctx, verifyJwt),
-        );
+        return handleCaseImportDocumentRequest(request, env.DB, accessEmail);
+      }
+
+      if (url.pathname === '/api/case/message-history') {
+        return handleMessageHistoryRequest(request, env.DB, accessEmail);
       }
 
       if (url.pathname === '/api/case/export') {
-        return handleCaseExportRequest(
-          request,
-          env.DB,
-          await resolveAccessEmail(request, env, ctx, verifyJwt),
-        );
+        return handleCaseExportRequest(request, env.DB, accessEmail);
       }
 
       if (url.pathname === '/api/case/delete') {
-        return handleCaseDeleteRequest(
-          request,
-          env.DB,
-          await resolveAccessEmail(request, env, ctx, verifyJwt),
-        );
+        return handleCaseDeleteRequest(request, env.DB, accessEmail);
       }
 
       return new Response('Not found', { status: 404 });
