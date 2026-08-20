@@ -1,4 +1,5 @@
 import { ExtractedDocumentSchema } from '../domain/document';
+import type { D1Database } from '../storage/d1-types';
 import {
   createDocumentAnalysisService,
   evaluateDocumentAnalysisGate,
@@ -17,6 +18,7 @@ export interface WorkerEnv {
   PAYLOAD_LOGGING_DISABLED?: string;
   TEAM_DOMAIN?: string;
   POLICY_AUD?: string;
+  DB?: D1Database;
 }
 
 export type ProviderFactory = (apiKey: string) => DocumentAnalysisProvider;
