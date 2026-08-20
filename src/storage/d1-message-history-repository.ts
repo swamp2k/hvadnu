@@ -42,13 +42,12 @@ export interface MessageAnalysisContext {
 export class D1MessageHistoryRepository {
   constructor(private readonly db: D1Database, private readonly caseId = PRIMARY_CASE_ID) {}
 
-  async saveAnalyzedMessage(message: string, analysis: MessageAnalysisResult): Promise<{ sourceId: string; eventId: string }> {
+  async saveAnalyzedMessage(message: string, analysis: MessageAnalysisResult, sourceId = crypto.randomUUID()): Promise<{ sourceId: string; eventId: string }> {
     const cleanMessage = message.trim();
     if (!cleanMessage) throw new Error('empty_message');
     if (analysis.mode !== 'model_analysis') throw new Error('model_analysis_required');
 
     const now = new Date().toISOString();
-    const sourceId = crypto.randomUUID();
     const eventId = crypto.randomUUID();
     const hash = await sha256Hex(cleanMessage);
     const label = `Besked analyseret ${new Date(now).toLocaleDateString('da-DK')}`;
