@@ -22,13 +22,15 @@ Analysis never implies persistence. `synthetic_demo` explanations are rejected b
 
 M3b stores:
 
-- extracted document text;
-- SHA-256 of that extracted text;
+- extracted document text as bounded page-aware chunks;
+- SHA-256 of the complete extracted text;
 - document metadata;
 - the already validated structured model analysis;
 - one source-linked timeline event.
 
 Original PDF/DOCX/file bytes are not stored in M3b.
+
+Source chunks are capped at 12,000 characters. This avoids large-row edge cases in D1 and creates the retrieval unit that can later receive FTS5 indexing without rewriting persisted documents.
 
 A document import does **not** create or confirm current-state entries. Unknown document dates remain `NULL`; import time is not presented as the source/event date.
 
@@ -47,7 +49,7 @@ Responses use `Cache-Control: no-store` and payload content is not logged by app
 
 ## Data control
 
-The Sagen view exposes explicit full JSON export and full-case deletion. Deleting the case cascades through sources, timeline links and current-state relations.
+The Sagen view exposes explicit full JSON export and full-case deletion. Export includes all persisted source chunks and validated analysis JSON. Deleting the case cascades through chunks, sources, timeline links and current-state relations.
 
 ## Production migration gate
 
