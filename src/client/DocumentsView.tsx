@@ -63,6 +63,9 @@ function Explanation({ explanation }: { explanation: DocumentExplanation }) {
 function ExtractionPreview({ document }: { document: ExtractedDocument }) {
   const text = useMemo(() => document.pages.map((page) => page.text).filter(Boolean).join('\n\n'), [document]);
   const preview = text.slice(0, 6000);
+  const structureLabel = document.kind === 'pdf'
+    ? `${document.pageCount} ${document.pageCount === 1 ? 'side' : 'sider'}`
+    : '1 tekstblok';
 
   return (
     <section className="document-stack" aria-live="polite">
@@ -76,7 +79,7 @@ function ExtractionPreview({ document }: { document: ExtractedDocument }) {
         </div>
         <div className="document-meta">
           <span>{formatBytes(document.sizeBytes)}</span>
-          <span>{document.pageCount} {document.pageCount === 1 ? 'side' : 'sider'}</span>
+          <span>{structureLabel}</span>
           <span>{document.characterCount.toLocaleString('da-DK')} tegn</span>
         </div>
       </article>
@@ -143,7 +146,7 @@ export function DocumentsView() {
           <span>{working ? 'Læser dokument …' : 'Vælg PDF, DOCX eller tekst'}</span>
           <input type="file" accept=".pdf,.docx,.txt,.md,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={handleFile} disabled={working} />
         </label>
-        <p className="muted compact">Maks. 25 MB og 300 PDF-sider i den lokale mobil-preview. Ingen fil eller tekst sendes fra browseren.</p>
+        <p className="muted compact">Maks. 25 MB generelt, 10 MB for DOCX og 300 PDF-sider i den lokale mobil-preview. Ingen fil eller tekst sendes fra browseren.</p>
         <div className="document-demo-separator"><span>eller</span></div>
         <button className="secondary-button" type="button" onClick={loadSyntheticExplanation}>Prøv syntetisk advokatbrev</button>
         <details className="synthetic-raw">
