@@ -31,11 +31,17 @@ They are declared in `wrangler.jsonc` as `secrets.required`. Current Wrangler va
 
 Store `ALLOWED_EMAIL` as a Cloudflare secret too even though it is not a credential; this keeps the case user's identity out of the public repository. Secrets are preserved across normal Wrangler deploys. `keep_vars=true` also remains enabled so other dashboard/runtime-only variables are not erased by GitHub-driven deploys.
 
+## Authentication boundary
+
+The Worker does not trust an identity copied from a request header. It reads the authenticated user from Cloudflare's Worker-native Access context with `ctx.access.getIdentity()` and passes only that verified email into the document-analysis boundary.
+
+If `ctx.access` is absent, identity lookup fails, or the verified email does not exactly match `ALLOWED_EMAIL`, document analysis remains unavailable and no source text is read or sent to Anthropic.
+
 ## Status endpoint
 
 `GET /api/analysis-status`
 
-- requires the exact Cloudflare Access email allowlist match;
+- requires the exact verified Cloudflare Access identity / `ALLOWED_EMAIL` match;
 - never constructs an Anthropic client;
 - never reads a document body;
 - returns only `{ "available": true|false }`;
