@@ -6,24 +6,24 @@ import './current-case.css';
 
 const stateLabel: Record<CurrentStateEntry['status'], string> = {
   confirmed: 'Bekræftet',
-  candidate: 'Kandidat',
+  candidate: 'Forslag',
   superseded: 'Erstattet',
   rejected: 'Afvist',
 };
 
 const authorityLabel: Record<CurrentStateEntry['authority'], string> = {
-  court_or_authority_decision: 'Myndighed/ret',
+  court_or_authority_decision: 'Afgørelse',
   signed_party_agreement: 'Underskrevet aftale',
   confirmed_party_agreement: 'Bekræftet aftale',
-  lawyer_position: 'Advokatposition',
-  party_claim: 'Partsudsagn',
+  lawyer_position: 'Advokatens vurdering',
+  party_claim: 'Påstand fra en part',
   unknown: 'Ukendt',
 };
 
 function caseErrorMessage(error: unknown): string {
   if (error instanceof CaseApiError) {
-    if (error.status === 401) return 'Cloudflare Access-sessionen kunne ikke godkendes.';
-    if (error.status === 503) return 'Sagsdatabasen er ikke klar endnu.';
+    if (error.status === 401) return 'Din session er udløbet. Prøv at genindlæse siden.';
+    if (error.status === 503) return 'Sagen kan ikke hentes lige nu.';
   }
   return 'Sagen kunne ikke hentes lige nu.';
 }
@@ -58,9 +58,7 @@ export function CurrentCaseView() {
     }
   }
 
-  useEffect(() => {
-    void refresh();
-  }, []);
+  useEffect(() => { void refresh(); }, []);
 
   const sourceLabels = useMemo(
     () => new Map((snapshot?.sources ?? []).map((source) => [source.id, source.label])),
@@ -82,46 +80,28 @@ export function CurrentCaseView() {
   async function handleExport() {
     setMaintenanceWorking(true);
     setError(null);
-    try {
-      downloadJson(await exportCase());
-    } catch (cause) {
-      setError(caseErrorMessage(cause));
-    } finally {
-      setMaintenanceWorking(false);
-    }
+    try { downloadJson(await exportCase()); } catch (cause) { setError(caseErrorMessage(cause)); } finally { setMaintenanceWorking(false); }
   }
 
   async function handleDelete() {
-    if (!window.confirm('Slet hele den gemte sag? Dette fjerner alle gemte kilder, analyser, timeline-poster og current-state data.')) return;
+    if (!window.confirm('Slet hele den gemte sag? Dette fjerner alle gemte dokumenter, beskeder og analyser.')) return;
     setMaintenanceWorking(true);
     setError(null);
-    try {
-      await deleteCase();
-      await refresh();
-    } catch (cause) {
-      setError(caseErrorMessage(cause));
-    } finally {
-      setMaintenanceWorking(false);
-    }
+    try { await deleteCase(); await refresh(); } catch (cause) { setError(caseErrorMessage(cause)); } finally { setMaintenanceWorking(false); }
   }
 
   return (
     <>
       <section className="intro">
         <h2>Hvad gælder lige nu?</h2>
-        <p>Et kildebaseret overblik over det, der er gemt i sagen. Dokumentanalyse bliver ikke automatisk til gældende state.</p>
-      </section>
-
-      <section className="case-warning" role="note">
-        <strong>M3b · live sag</strong>
-        <span>Kilder gemmes kun efter et eksplicit “Gem i sagen”. AI kan foreslå kandidater senere, men kun bruger eller deterministiske regler må bekræfte gældende state.</span>
+        <p>Her samles de aftaler og afgørelser, som er bekræftet i sagen. Dokumenter og beskeder bliver ikke automatisk gjort gældende.</p>
       </section>
 
       <section className="case-maintenance card">
         <div className="section-title-row">
-          <div><strong>Datahåndtering</strong><p className="muted compact">Eksportér alt eller slet hele den gemte sag.</p></div>
+          <div><strong>Din sag</strong><p className="muted compact">Hent en kopi eller slet alt, der er gemt.</p></div>
           <div className="case-actions">
-            <button className="text-button" type="button" disabled={maintenanceWorking} onClick={() => { void handleExport(); }}>Eksportér</button>
+            <button className="text-button" type="button" disabled={maintenanceWorking} onClick={() => { void handleExport(); }}>Hent kopi</button>
             <button className="text-button danger-text" type="button" disabled={maintenanceWorking} onClick={() => { void handleDelete(); }}>Slet sag</button>
           </div>
         </div>
@@ -134,56 +114,39 @@ export function CurrentCaseView() {
         <>
           <section className="case-section">
             <div className="section-title-row">
-              <div><p className="eyebrow">Current state</p><h2>Sagen lige nu</h2></div>
-              <button className="text-button" type="button" onClick={() => setShowSuperseded((value) => !value)}>
-                {showSuperseded ? 'Skjul erstattede' : 'Vis erstattede'}
-              </button>
+              <div><p className="eyebrow">Lige nu</p><h2>Sagen lige nu</h2></div>
+              <button className="text-button" type="button" onClick={() => setShowSuperseded((value) => !value)}>{showSuperseded ? 'Skjul gamle' : 'Vis gamle'}</button>
             </div>
 
             <div className="state-list">
               {visibleState.length === 0 && (
                 <article className="card quiet-card">
-                  <strong>Ingen bekræftet current state endnu</strong>
-                  <p>Gemte dokumenter kommer på tidslinjen, men bliver ikke automatisk gjort gældende.</p>
+                  <strong>Der er endnu ikke noget bekræftet her</strong>
+                  <p>Gemte dokumenter og beskeder vises på tidslinjen, men bliver først vist her, når det er bekræftet, hvad der faktisk gælder.</p>
                 </article>
               )}
               {visibleState.map((entry) => (
                 <article className={`card state-card state-${entry.status}`} key={entry.id}>
-                  <div className="section-title-row">
-                    <strong>{entry.summary}</strong>
-                    <span className="status-pill">{stateLabel[entry.status]}</span>
-                  </div>
-                  <p className="muted">{authorityLabel[entry.authority]} · emne: {entry.topic}</p>
-                  <div className="source-links">
-                    {entry.sourceRefs.map((ref) => <span className="source-chip" key={`${entry.id}-${ref.sourceId}`}>{sourceLabels.get(ref.sourceId) ?? ref.sourceId}</span>)}
-                  </div>
-                  {entry.status === 'candidate' && (
-                    <p className="candidate-note">Dette er kun en kandidat. Den må ikke bruges som gældende state uden eksplicit bekræftelse.</p>
-                  )}
+                  <div className="section-title-row"><strong>{entry.summary}</strong><span className="status-pill">{stateLabel[entry.status]}</span></div>
+                  <p className="muted">{authorityLabel[entry.authority]} · {entry.topic}</p>
+                  <div className="source-links">{entry.sourceRefs.map((ref) => <span className="source-chip" key={`${entry.id}-${ref.sourceId}`}>{sourceLabels.get(ref.sourceId) ?? ref.sourceId}</span>)}</div>
+                  {entry.status === 'candidate' && <p className="candidate-note">Dette er et forslag og er ikke bekræftet som gældende endnu.</p>}
                 </article>
               ))}
             </div>
           </section>
 
           <section className="case-section">
-            <div><p className="eyebrow">Timeline</p><h2>Sagens tidslinje</h2></div>
+            <div><p className="eyebrow">Historik</p><h2>Sagens tidslinje</h2></div>
             <div className="timeline">
-              {timeline.length === 0 && (
-                <article className="card quiet-card"><strong>Ingen gemte kilder endnu</strong><p>Analyser et dokument og vælg derefter “Gem i sagen”.</p></article>
-              )}
+              {timeline.length === 0 && <article className="card quiet-card"><strong>Der er ikke gemt noget endnu</strong><p>Gem et dokument eller analysér en besked, så dukker det op her.</p></article>}
               {timeline.map((event) => (
                 <article className="timeline-item" key={event.id}>
                   <div className="timeline-dot" aria-hidden="true" />
                   <div className="timeline-content">
-                    <div className="section-title-row">
-                      <strong>{event.title}</strong>
-                      {event.occurredAt ? <time dateTime={event.occurredAt}>{new Date(event.occurredAt).toLocaleDateString('da-DK')}</time> : <span className="muted">Dato ukendt</span>}
-                    </div>
+                    <div className="section-title-row"><strong>{event.title}</strong>{event.occurredAt ? <time dateTime={event.occurredAt}>{new Date(event.occurredAt).toLocaleDateString('da-DK')}</time> : <span className="muted">Dato ukendt</span>}</div>
                     <p>{event.summary}</p>
-                    <div className="source-links">
-                      {event.sourceIds.map((sourceId) => <span className="source-chip" key={`${event.id}-${sourceId}`}>{sourceLabels.get(sourceId) ?? sourceId}</span>)}
-                      {event.disputed && <span className="source-chip disputed-chip">Bestridt</span>}
-                    </div>
+                    <div className="source-links">{event.sourceIds.map((sourceId) => <span className="source-chip" key={`${event.id}-${sourceId}`}>{sourceLabels.get(sourceId) ?? sourceId}</span>)}{event.disputed && <span className="source-chip disputed-chip">Uenighed om dette</span>}</div>
                   </div>
                 </article>
               ))}
