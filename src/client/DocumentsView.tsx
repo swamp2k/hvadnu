@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import type { DocumentExplanation, ExtractedDocument } from '../domain/document';
 import { extractDocumentLocally } from '../documents/extract-document';
 import { explainSyntheticDocument, SYNTHETIC_DOCUMENT_TEXT } from '../documents/synthetic-document';
+import { saveAnalyzedDocumentToCase, CaseApiError } from './case-api';
 import {
   analyzeDocument,
   DocumentAnalysisApiError,
@@ -139,13 +140,25 @@ function analysisErrorMessage(error: unknown): string {
   return 'Dokumentet kunne ikke analyseres. Ingen analyse er gemt; prøv igen senere.';
 }
 
+function saveErrorMessage(error: unknown): string {
+  if (error instanceof CaseApiError) {
+    if (error.status === 401) return 'Sagen kunne ikke gemmes, fordi Access-sessionen ikke blev godkendt.';
+    if (error.status === 413) return 'Dokumentet er for stort til at gemme i denne version.';
+    if (error.status === 503) return 'Sagsdatabasen er ikke klar endnu.';
+  }
+  return 'Dokumentet kunne ikke gemmes i sagen. Analysen er stadig synlig her og kan prøves gemt igen.';
+}
+
 export function DocumentsView() {
   const [extracted, setExtracted] = useState<ExtractedDocument | null>(null);
   const [explanation, setExplanation] = useState<DocumentExplanation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
   const [analysisWorking, setAnalysisWorking] = useState(false);
+  const [saveWorking, setSaveWorking] = useState(false);
+  const [savedSourceId, setSavedSourceId] = useState<string | null>(null);
   const [analysisAvailable, setAnalysisAvailable] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -162,6 +175,8 @@ export function DocumentsView() {
     setWorking(true);
     setError(null);
     setAnalysisError(null);
+    setSaveError(null);
+    setSavedSourceId(null);
     setExplanation(null);
     setExtracted(null);
     try {
@@ -178,6 +193,8 @@ export function DocumentsView() {
     if (!extracted || analysisAvailable !== true) return;
     setAnalysisWorking(true);
     setAnalysisError(null);
+    setSaveError(null);
+    setSavedSourceId(null);
     setExplanation(null);
     try {
       setExplanation(await analyzeDocument(extracted));
@@ -191,10 +208,26 @@ export function DocumentsView() {
     }
   }
 
+  async function handleSave() {
+    if (!extracted || !explanation || explanation.mode !== 'model_analysis' || savedSourceId) return;
+    setSaveWorking(true);
+    setSaveError(null);
+    try {
+      const saved = await saveAnalyzedDocumentToCase(extracted, explanation);
+      setSavedSourceId(saved.sourceId);
+    } catch (cause) {
+      setSaveError(saveErrorMessage(cause));
+    } finally {
+      setSaveWorking(false);
+    }
+  }
+
   function loadSyntheticExplanation() {
     setExtracted(null);
     setError(null);
     setAnalysisError(null);
+    setSaveError(null);
+    setSavedSourceId(null);
     setExplanation(explainSyntheticDocument());
   }
 
@@ -202,17 +235,17 @@ export function DocumentsView() {
     <>
       <section className="intro">
         <h2>Hvad står der egentlig?</h2>
-        <p>Dokumentet læses først lokalt på telefonen. Når AI er aktiveret, kan den udtrukne tekst sendes videre til en kildebevarende Sonnet-analyse.</p>
+        <p>Dokumentet læses først lokalt på telefonen. Analyse og lagring er to separate handlinger: intet gemmes i sagen, før du aktivt vælger det.</p>
       </section>
 
       <section className="document-upload card">
         <label className="upload-button">
           <span>{working ? 'Læser dokument …' : 'Vælg PDF, DOCX eller tekst'}</span>
-          <input type="file" accept=".pdf,.docx,.txt,.md,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={handleFile} disabled={working || analysisWorking} />
+          <input type="file" accept=".pdf,.docx,.txt,.md,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={handleFile} disabled={working || analysisWorking || saveWorking} />
         </label>
-        <p className="muted compact">Maks. 25 MB generelt, 10 MB for DOCX og 300 PDF-sider i den lokale mobil-preview. Originalfilen forlader ikke browseren.</p>
+        <p className="muted compact">Maks. 25 MB generelt, 10 MB for DOCX og 300 PDF-sider i den lokale mobil-preview. Originalfilen uploades ikke.</p>
         <div className="document-demo-separator"><span>eller</span></div>
-        <button className="secondary-button" type="button" onClick={loadSyntheticExplanation} disabled={analysisWorking}>Prøv syntetisk advokatbrev</button>
+        <button className="secondary-button" type="button" onClick={loadSyntheticExplanation} disabled={analysisWorking || saveWorking}>Prøv syntetisk advokatbrev</button>
         <details className="synthetic-raw">
           <summary>Se teksten i det syntetiske dokument</summary>
           <pre>{SYNTHETIC_DOCUMENT_TEXT}</pre>
@@ -221,6 +254,7 @@ export function DocumentsView() {
 
       {error && <section className="card error-card" role="alert"><strong>Kunne ikke læse dokumentet</strong><p>{error}</p></section>}
       {analysisError && <section className="card error-card" role="alert"><strong>Kunne ikke analysere dokumentet</strong><p>{analysisError}</p></section>}
+      {saveError && <section className="card error-card" role="alert"><strong>Kunne ikke gemme i sagen</strong><p>{saveError}</p></section>}
       {extracted && (
         <ExtractionPreview
           document={extracted}
@@ -231,11 +265,21 @@ export function DocumentsView() {
       )}
       {explanation && <Explanation explanation={explanation} />}
 
+      {extracted && explanation?.mode === 'model_analysis' && (
+        <section className="card case-save-card" aria-live="polite">
+          <h3>Gem i sagen</h3>
+          <p>Dette gemmer den udtrukne tekst, dens SHA-256, den validerede analyse og en kildehenvist timeline-post i den private EU-database. Originalfilens bytes gemmes ikke.</p>
+          <button className="primary-button" type="button" onClick={() => { void handleSave(); }} disabled={saveWorking || Boolean(savedSourceId)}>
+            {savedSourceId ? 'Gemt i sagen' : saveWorking ? 'Gemmer …' : 'Gem i sagen'}
+          </button>
+        </section>
+      )}
+
       {!extracted && !explanation && !error && (
         <section className="empty-state">
           <div className="empty-icon">▤</div>
           <h3>Original først, forklaring bagefter</h3>
-          <p>Extraction og fortolkning er adskilt, så en AI-opsummering aldrig bliver forvekslet med selve dokumentet.</p>
+          <p>Extraction, fortolkning og persistence er adskilt, så en AI-opsummering aldrig bliver forvekslet med selve dokumentet eller gemt ved et uheld.</p>
         </section>
       )}
     </>

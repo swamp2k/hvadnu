@@ -3,6 +3,28 @@ import type { CaseSnapshot } from '../domain/case-state';
 export const SYNTHETIC_CASE_SNAPSHOT: CaseSnapshot = {
   caseId: 'synthetic-family-case',
   generatedAt: '2026-08-20T12:00:00.000Z',
+  sources: [
+    {
+      id: 'doc-2023-old-contact',
+      label: 'Tidligere samværsaftale · 10. februar 2023',
+      sourceType: 'document',
+    },
+    {
+      id: 'doc-2025-current-contact',
+      label: 'Samværsaftale · 12. april 2025',
+      sourceType: 'document',
+    },
+    {
+      id: 'doc-2026-lawyer-proposal',
+      label: 'Advokatbrev · 3. juni 2026',
+      sourceType: 'document',
+    },
+    {
+      id: 'msg-2026-08-01-parent-b',
+      label: 'SMS fra den anden forælder · 1. august 2026',
+      sourceType: 'message',
+    },
+  ],
   timeline: [
     {
       id: 'evt-2023-old-agreement',
