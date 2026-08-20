@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   DocumentExplanationPayloadSchema,
   DocumentExplanationSchema,
+  ExtractedDocumentSchema,
   type DocumentExplanation,
   type ExtractedDocument,
 } from '../domain/document';
@@ -81,12 +82,16 @@ export function createDocumentAnalysisService(
   const gate = DocumentAnalysisGateSchema.parse(gateInput);
 
   return {
-    async analyze(document) {
+    async analyze(documentInput) {
       const evaluation = evaluateDocumentAnalysisGate(gate);
       if (!evaluation.allowed) throw new DocumentAnalysisBlockedError(evaluation.blockers);
 
-      if (document.characterCount > MAX_SINGLE_DOCUMENT_ANALYSIS_CHARACTERS) {
-        throw new DocumentRequiresChunkingError(document.characterCount);
+      // Treat all future client/runtime document metadata as untrusted. Validate the
+      // structure and derive the actual model payload size from source text here.
+      const document = ExtractedDocumentSchema.parse(documentInput);
+      const actualCharacterCount = document.pages.reduce((sum, page) => sum + page.text.length, 0);
+      if (actualCharacterCount > MAX_SINGLE_DOCUMENT_ANALYSIS_CHARACTERS) {
+        throw new DocumentRequiresChunkingError(actualCharacterCount);
       }
 
       const raw = await provider.analyze({
