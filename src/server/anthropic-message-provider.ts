@@ -1,11 +1,17 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { MessageAnalysisPayloadSchema, type MessageAnalysisPayload } from '../domain/message-result';
-import { MESSAGE_ANALYSIS_SYSTEM_PROMPT } from '../ai/prompts/message-analysis';
+import { MESSAGE_ANALYSIS_SYSTEM_PROMPT, MESSAGE_REVIEW_SYSTEM_PROMPT } from '../ai/prompts/message-analysis';
 import type { MessageAnalysisContext } from '../storage/d1-message-history-repository';
 
+interface MessageAnalysisInput {
+  message: string;
+  context: MessageAnalysisContext;
+}
+
 export interface MessageAnalysisProvider {
-  analyze(input: { message: string; context: MessageAnalysisContext }): Promise<MessageAnalysisPayload>;
+  analyze(input: MessageAnalysisInput): Promise<MessageAnalysisPayload>;
+  review(input: MessageAnalysisInput & { firstAnalysis: MessageAnalysisPayload }): Promise<MessageAnalysisPayload>;
 }
 
 export class AnthropicMessageAnalysisError extends Error {
@@ -13,6 +19,13 @@ export class AnthropicMessageAnalysisError extends Error {
     super(message);
     this.name = 'AnthropicMessageAnalysisError';
   }
+}
+
+function parsedOutputOrThrow(response: Awaited<ReturnType<Anthropic['messages']['parse']>>): MessageAnalysisPayload {
+  if (response.stop_reason === 'refusal') throw new AnthropicMessageAnalysisError('Claude refused the message analysis request.');
+  if (response.stop_reason === 'max_tokens') throw new AnthropicMessageAnalysisError('Claude reached the output limit.');
+  if (!response.parsed_output) throw new AnthropicMessageAnalysisError('Claude returned no validated structured result.');
+  return MessageAnalysisPayloadSchema.parse(response.parsed_output);
 }
 
 export function createAnthropicMessageAnalysisProvider(apiKey: string): MessageAnalysisProvider {
@@ -37,11 +50,27 @@ export function createAnthropicMessageAnalysisProvider(apiKey: string): MessageA
         }],
         output_config: { format: zodOutputFormat(MessageAnalysisPayloadSchema) },
       });
+      return parsedOutputOrThrow(response);
+    },
 
-      if (response.stop_reason === 'refusal') throw new AnthropicMessageAnalysisError('Claude refused the message analysis request.');
-      if (response.stop_reason === 'max_tokens') throw new AnthropicMessageAnalysisError('Claude reached the output limit.');
-      if (!response.parsed_output) throw new AnthropicMessageAnalysisError('Claude returned no validated structured result.');
-      return response.parsed_output;
+    async review({ message, context, firstAnalysis }) {
+      const response = await client.messages.parse({
+        model: 'claude-sonnet-5',
+        max_tokens: 4096,
+        system: MESSAGE_REVIEW_SYSTEM_PROMPT,
+        messages: [{
+          role: 'user',
+          content: JSON.stringify({
+            sourceType: 'critical_review_bundle',
+            message,
+            caseContext: context,
+            firstAnalysis,
+            instructions: 'Return the complete corrected structured analysis in the required schema. Preserve supported parts, but remove or correct anything unsupported, stale, overconfident, escalatory, or based on model memory.',
+          }),
+        }],
+        output_config: { format: zodOutputFormat(MessageAnalysisPayloadSchema) },
+      });
+      return parsedOutputOrThrow(response);
     },
   };
 }
