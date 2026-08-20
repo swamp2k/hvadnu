@@ -36,6 +36,7 @@ export class InMemoryCaseRepository implements CaseRepository {
     const nextEntries: CurrentStateEntry[] = snapshot.currentState.map((entry) => {
       if (entry.id !== entryId) return entry;
       found = true;
+      if (entry.status !== 'candidate') throw new Error('current_state_entry_not_candidate');
       return { ...entry, status: 'confirmed', confirmedBy };
     });
 
