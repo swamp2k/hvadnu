@@ -27,3 +27,6 @@ jobs:
 
       - name: Typecheck and test
         run: npm run check
+
+      - name: Validate Cloudflare deployment config
+        run: npx wrangler deploy --dry-run
