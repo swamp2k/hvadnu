@@ -1,0 +1,18 @@
+.case-warning { display:flex; flex-direction:column; gap:3px; margin:0 0 18px; padding:13px 14px; border-radius:14px; background:#fbf4df; border:1px solid #ead9a8; font-size:13px; }
+.case-warning span { color:#6f654d; line-height:1.45; }
+.case-section { display:grid; gap:12px; margin-top:22px; }
+.case-section h2 { margin:0; font-size:22px; letter-spacing:-0.03em; }
+.state-list { display:grid; gap:10px; }
+.state-card .status-pill { background:#eef2ef; color:#586861; }
+.state-confirmed { border-left:4px solid #4f8062; }
+.state-candidate { border-left:4px solid #c89b45; background:#fffdfa; }
+.state-superseded { opacity:.68; }
+.candidate-note { padding-top:10px; border-top:1px solid #eee6d7; color:#6b5e42; font-size:12px; }
+.timeline { display:grid; gap:0; }
+.timeline-item { position:relative; display:grid; grid-template-columns:18px 1fr; gap:11px; }
+.timeline-item:not(:last-child)::before { content:''; position:absolute; left:6px; top:16px; bottom:-7px; width:2px; background:#dce4df; }
+.timeline-dot { width:14px; height:14px; margin-top:17px; border:3px solid #f4f6f2; border-radius:50%; background:#517466; box-shadow:0 0 0 1px #bfcfc7; z-index:1; }
+.timeline-content { margin-bottom:10px; padding:14px 15px; border:1px solid #dfe5e1; border-radius:16px; background:white; }
+.timeline-content time { color:#728079; font-size:11px; white-space:nowrap; }
+.timeline-content p { margin:7px 0 0; color:#4e5d57; line-height:1.45; }
+.disputed-chip { background:#f4e4df; color:#7a4032; }
