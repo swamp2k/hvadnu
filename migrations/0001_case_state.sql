@@ -13,6 +13,12 @@ CREATE TABLE IF NOT EXISTS case_sources (
   label TEXT NOT NULL,
   occurred_at TEXT,
   immutable_sha256 TEXT,
+  mime_type TEXT,
+  document_kind TEXT,
+  size_bytes INTEGER,
+  character_count INTEGER,
+  source_text TEXT,
+  analysis_json TEXT,
   created_at TEXT NOT NULL,
   UNIQUE (case_id, id)
 );
@@ -22,7 +28,7 @@ CREATE INDEX IF NOT EXISTS idx_case_sources_case_id ON case_sources(case_id);
 CREATE TABLE IF NOT EXISTS case_timeline_events (
   id TEXT PRIMARY KEY,
   case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
-  occurred_at TEXT NOT NULL,
+  occurred_at TEXT,
   kind TEXT NOT NULL CHECK (kind IN ('document','message','agreement','decision','proposal','claim','deadline')),
   topic TEXT NOT NULL,
   title TEXT NOT NULL,
