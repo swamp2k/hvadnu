@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { handleMessageAnalysisRequest } from '../../src/server/message-analysis-endpoint';
 import type { MessageAnalysisProvider } from '../../src/server/anthropic-message-provider';
+import type { WebResearchProvider } from '../../src/server/anthropic-web-research-provider';
 import type { WorkerEnv } from '../../src/server/document-analysis-endpoint';
+import type { MessageContextSource } from '../../src/storage/d1-message-history-repository';
 import type { D1Database, D1PreparedStatement, D1Result } from '../../src/storage/d1-types';
 
 class FakeStatement implements D1PreparedStatement {
@@ -38,11 +40,11 @@ function env(db: D1Database): WorkerEnv {
   };
 }
 
-function request(message = 'Kan børnene hentes torsdag kl. 16?') {
+function request(message = 'Kan børnene hentes torsdag kl. 16?', webSearch = false) {
   return new Request('https://private.example.invalid/api/analyze-message', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, webSearch }),
   });
 }
 
@@ -67,7 +69,7 @@ function payloadFor(id: string, highUncertainty = true) {
   };
 }
 
-function usage(taskType: 'message_analysis' | 'message_review', effort: 'medium' | 'high') {
+function usage(taskType: 'message_analysis' | 'message_review' | 'web_research', effort: 'medium' | 'high') {
   return {
     taskType,
     model: 'claude-sonnet-5' as const,
@@ -93,7 +95,26 @@ function providerFor(sourceId: (context: Parameters<MessageAnalysisProvider['ana
   };
 }
 
-describe('M3d efficient live message analysis', () => {
+function webSource(): MessageContextSource {
+  return {
+    sourceId: 'web:1',
+    label: 'Officiel webkilde: Syntetisk domstolsafgørelse',
+    sourceType: 'web_official',
+    locator: 'https://www.domstol.dk/synthetic/decision',
+    text: 'Syntetisk citeret tekst fra en offentlig afgørelse.',
+    status: 'unknown',
+  };
+}
+
+function webProvider(source = webSource()): WebResearchProvider {
+  return {
+    async research() {
+      return { sources: [source], usage: usage('web_research', 'medium') };
+    },
+  };
+}
+
+describe('M4 legal-aware live message analysis', () => {
   it('fails closed before D1/provider work without Access identity', async () => {
     const db = new FakeDb();
     let constructed = false;
@@ -159,6 +180,90 @@ describe('M3d efficient live message analysis', () => {
     expect(reviewCalled).toBe(true);
     const telemetryWrites = db.batches.filter((batch) => batch.some((statement) => statement.query.includes('ai_usage_events')));
     expect(telemetryWrites).toHaveLength(2);
+  });
+
+  it('adds opt-in web research as evidence, normalizes its citation metadata, and snapshots only cited web material', async () => {
+    const db = new FakeDb();
+    const source = webSource();
+    const mainProvider: MessageAnalysisProvider = {
+      async analyze({ context }) {
+        expect(context.sources.some((item) => item.sourceId === source.sourceId)).toBe(true);
+        return {
+          payload: {
+            summary: 'En offentlig afgørelse kan være relevant.',
+            replyNeeded: ['Svar kort.'],
+            canIgnore: [],
+            caseContext: [{ text: 'Webkilden er relevant research.', sourceIds: [source.sourceId] }],
+            legalAssessment: {
+              level: 'supported',
+              title: 'Research fundet',
+              explanation: 'Det konkrete webuddrag understøtter vurderingen.',
+              sourceIds: [source.sourceId],
+            },
+            communicationAssessment: { title: 'Neutral', explanation: 'Svar neutralt.' },
+            suggestedReply: 'Tak. Jeg forholder mig til det skriftligt.',
+            uncertainty: { level: 'low', missing: [] },
+            citations: [{
+              sourceId: source.sourceId,
+              label: 'MODEL MAY NOT CHOOSE LABEL',
+              status: 'current',
+              locator: 'https://invented.example.invalid/',
+            }],
+          },
+          usage: usage('message_analysis', 'medium'),
+        };
+      },
+      async review() {
+        throw new Error('review_not_expected');
+      },
+    };
+
+    const response = await handleMessageAnalysisRequest(
+      request('Findes der afgørelser om dette samværsspørgsmål?', true),
+      env(db),
+      'user@example.invalid',
+      () => mainProvider,
+      () => webProvider(source),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      historySaved: boolean;
+      webSearch: { requested: boolean; used: boolean; sourceCount: number; failed: boolean };
+      analysis: { citations: Array<{ sourceId: string; label: string; locator?: string; status: string }> };
+    };
+    expect(body.historySaved).toBe(true);
+    expect(body.webSearch).toEqual({ requested: true, used: true, sourceCount: 1, failed: false });
+    expect(body.analysis.citations[0]).toMatchObject({
+      sourceId: 'web:1',
+      label: source.label,
+      locator: source.locator,
+      status: 'unknown',
+    });
+    const webInsert = db.batches.flat().find((statement) => statement.query.includes('INSERT INTO message_web_sources'));
+    expect(webInsert?.values).toContain(source.locator);
+    expect(webInsert?.values).toContain(source.text);
+    const telemetryWrites = db.batches.filter((batch) => batch.some((statement) => statement.query.includes('ai_usage_events')));
+    expect(telemetryWrites).toHaveLength(2);
+  });
+
+  it('fails soft when optional web research is unavailable and still analyzes from case/library context', async () => {
+    const db = new FakeDb();
+    const base = providerFor((context) => context.sources[0]!.sourceId, false);
+    const response = await handleMessageAnalysisRequest(
+      request('Hvad gælder om samvær?', true),
+      env(db),
+      'user@example.invalid',
+      () => base,
+      () => ({ async research() { throw new Error('synthetic_web_failure'); } }),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      historySaved: boolean;
+      webSearch: { requested: boolean; used: boolean; sourceCount: number; failed: boolean };
+    };
+    expect(body.historySaved).toBe(true);
+    expect(body.webSearch).toEqual({ requested: true, used: false, sourceCount: 0, failed: true });
+    expect(db.batches.flat().some((statement) => statement.query.includes('message_web_sources'))).toBe(false);
   });
 
   it('rejects fabricated source IDs and does not persist message history', async () => {

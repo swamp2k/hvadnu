@@ -71,6 +71,16 @@ export interface PersistedCaseSource {
   chunks: PersistedSourceChunk[];
 }
 
+export interface PersistedWebSource {
+  messageSourceId: string;
+  sourceId: string;
+  url: string;
+  title: string;
+  sourceType: 'web_official' | 'web_secondary';
+  citedText: string;
+  createdAt: string;
+}
+
 interface SourceRow {
   id: string;
   label: string;
@@ -92,10 +102,21 @@ interface ChunkRow {
   text: string;
 }
 
+interface WebSourceRow {
+  message_source_id: string;
+  source_id: string;
+  url: string;
+  title: string;
+  source_type: 'web_official' | 'web_secondary';
+  cited_text: string;
+  created_at: string;
+}
+
 export interface CaseExport {
   exportedAt: string;
   snapshot: CaseSnapshot;
   sources: PersistedCaseSource[];
+  webSources: PersistedWebSource[];
 }
 
 export async function sha256Hex(value: string): Promise<string> {
@@ -279,7 +300,7 @@ export class D1CaseRepository {
   }
 
   async exportCase(): Promise<CaseExport> {
-    const [snapshot, sourceResult, chunkResult] = await Promise.all([
+    const [snapshot, sourceResult, chunkResult, webSourceResult] = await Promise.all([
       this.getSnapshot(),
       this.db.prepare(`SELECT id, label, source_type, occurred_at, immutable_sha256,
         mime_type, document_kind, size_bytes, character_count, analysis_json, created_at
@@ -288,6 +309,9 @@ export class D1CaseRepository {
       this.db.prepare(`SELECT source_id, chunk_index, page_number, text
         FROM case_source_chunks WHERE case_id = ? ORDER BY source_id, chunk_index`)
         .bind(this.caseId).all<ChunkRow>(),
+      this.db.prepare(`SELECT message_source_id, source_id, url, title, source_type, cited_text, created_at
+        FROM message_web_sources WHERE case_id = ? ORDER BY message_source_id, source_id`)
+        .bind(this.caseId).all<WebSourceRow>(),
     ]);
 
     const chunksBySource = new Map<string, PersistedSourceChunk[]>();
@@ -301,6 +325,15 @@ export class D1CaseRepository {
       exportedAt: new Date().toISOString(),
       snapshot,
       sources: (sourceResult.results ?? []).map((row) => mapSource(row, chunksBySource.get(row.id) ?? [])),
+      webSources: (webSourceResult.results ?? []).map((row) => ({
+        messageSourceId: row.message_source_id,
+        sourceId: row.source_id,
+        url: row.url,
+        title: row.title,
+        sourceType: row.source_type,
+        citedText: row.cited_text,
+        createdAt: row.created_at,
+      })),
     };
   }
 
