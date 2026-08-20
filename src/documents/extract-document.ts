@@ -42,9 +42,10 @@ async function extractPdf(file: File): Promise<ExtractedDocument> {
   GlobalWorkerOptions.workerSrc = workerUrl.default;
 
   const data = new Uint8Array(await file.arrayBuffer());
-  const pdf = await getDocument({ data }).promise;
+  const loadingTask = getDocument({ data });
+  const pdf = await loadingTask.promise;
   if (pdf.numPages > MAX_LOCAL_PDF_PAGES) {
-    await pdf.destroy();
+    await loadingTask.destroy();
     throw new Error(`PDF'en har ${pdf.numPages} sider. Lokal preview er begrænset til ${MAX_LOCAL_PDF_PAGES} sider for ikke at fryse telefonen.`);
   }
 
@@ -61,7 +62,7 @@ async function extractPdf(file: File): Promise<ExtractedDocument> {
       pages.push({ pageNumber, text });
     }
   } finally {
-    await pdf.destroy();
+    await loadingTask.destroy();
   }
 
   const characterCount = pages.reduce((sum, page) => sum + page.text.length, 0);
