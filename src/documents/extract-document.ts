@@ -1,6 +1,7 @@
 import type { DocumentKind, ExtractedDocument } from '../domain/document';
 
 export const MAX_LOCAL_FILE_BYTES = 25 * 1024 * 1024;
+export const MAX_LOCAL_DOCX_BYTES = 10 * 1024 * 1024;
 export const MAX_LOCAL_PDF_PAGES = 300;
 
 export interface LocalFileDescriptor {
@@ -26,6 +27,9 @@ export function assertLocalDocumentAllowed(file: LocalFileDescriptor): DocumentK
   if (file.size <= 0) throw new Error('Filen er tom.');
   if (file.size > MAX_LOCAL_FILE_BYTES) {
     throw new Error('Filen er over 25 MB og behandles ikke lokalt på mobilen i denne version.');
+  }
+  if (kind === 'docx' && file.size > MAX_LOCAL_DOCX_BYTES) {
+    throw new Error('DOCX-filen er over 10 MB og behandles ikke lokalt, fordi komprimerede Word-filer kan bruge markant mere hukommelse under parsing.');
   }
   return kind;
 }
