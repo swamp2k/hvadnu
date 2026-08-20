@@ -29,20 +29,17 @@ export const CurrentStateEntrySchema = z.object({
   confirmedBy: z.enum(['deterministic_rule', 'user']).optional(),
 }).superRefine((entry, ctx) => {
   if (entry.status === 'confirmed' && !entry.confirmedBy) {
-    ctx.addIssue({
-      code: 'custom',
-      message: 'Confirmed current-state entries require explicit non-AI confirmation.',
-      path: ['confirmedBy'],
-    });
+    ctx.addIssue({ code: 'custom', message: 'Confirmed current-state entries require explicit non-AI confirmation.', path: ['confirmedBy'] });
+  }
+  if (entry.status !== 'confirmed' && entry.confirmedBy) {
+    ctx.addIssue({ code: 'custom', message: 'Only confirmed current-state entries may carry confirmedBy.', path: ['confirmedBy'] });
+  }
+  if (entry.supersedesEntryIds.includes(entry.id)) {
+    ctx.addIssue({ code: 'custom', message: 'A current-state entry cannot supersede itself.', path: ['supersedesEntryIds'] });
   }
 });
 
 export type CurrentStateEntry = z.infer<typeof CurrentStateEntrySchema>;
 
-export function canAiDirectlyConfirmCurrentState(): false {
-  return false;
-}
-
-export function isUsableAsCurrentState(entry: CurrentStateEntry): boolean {
-  return entry.status === 'confirmed' && entry.confirmedBy !== undefined;
-}
+export function canAiDirectlyConfirmCurrentState(): false { return false; }
+export function isUsableAsCurrentState(entry: CurrentStateEntry): boolean { return entry.status === 'confirmed' && entry.confirmedBy !== undefined; }
