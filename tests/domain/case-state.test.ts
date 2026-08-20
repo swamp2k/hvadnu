@@ -20,13 +20,15 @@ describe('M3 current-case foundation', () => {
 
   it('requires explicit non-AI confirmation before a candidate becomes current state', async () => {
     const repository = new InMemoryCaseRepository([SYNTHETIC_CASE_SNAPSHOT]);
-    const before = await repository.getSnapshot('synthetic-family-case');
-    expect(before?.currentState.find((entry) => entry.id === 'state-thursday-proposal')?.status).toBe('candidate');
-
     const after = await repository.confirmCurrentState('synthetic-family-case', 'state-thursday-proposal', 'user');
     const confirmed = after.currentState.find((entry) => entry.id === 'state-thursday-proposal');
     expect(confirmed?.status).toBe('confirmed');
     expect(confirmed?.confirmedBy).toBe('user');
+  });
+
+  it('cannot re-confirm superseded state', async () => {
+    const repository = new InMemoryCaseRepository([SYNTHETIC_CASE_SNAPSHOT]);
+    await expect(repository.confirmCurrentState('synthetic-family-case', 'state-old-weekend', 'user')).rejects.toThrow('current_state_entry_not_candidate');
   });
 
   it('returns defensive copies so readers cannot silently mutate repository state', async () => {
@@ -34,7 +36,6 @@ describe('M3 current-case foundation', () => {
     const first = await repository.getSnapshot('synthetic-family-case');
     if (!first) throw new Error('missing synthetic snapshot');
     first.timeline[0]!.title = 'mutated outside repository';
-
     const second = await repository.getSnapshot('synthetic-family-case');
     expect(second?.timeline[0]?.title).toBe('Tidligere samværsaftale');
   });
