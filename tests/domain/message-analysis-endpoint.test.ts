@@ -46,26 +46,34 @@ function request(message = 'Kan børnene hentes torsdag kl. 16?') {
   });
 }
 
-function providerFor(sourceId: (context: Parameters<MessageAnalysisProvider['analyze']>[0]['context']) => string): MessageAnalysisProvider {
+function payloadFor(id: string, highUncertainty = true) {
+  return {
+    summary: 'Beskeden spørger om et ændret tidspunkt.',
+    replyNeeded: ['Svar på tidspunktet.'],
+    canIgnore: [],
+    caseContext: [{ text: 'Den aktuelle besked spørger om torsdag.', sourceIds: [id] }],
+    legalAssessment: {
+      level: 'uncertain' as const,
+      title: 'Kræver sagsgrundlag',
+      explanation: 'Der er ikke leveret en aktuel juridisk kilde, som afgør spørgsmålet.',
+      sourceIds: [id],
+    },
+    communicationAssessment: { title: 'Svar kort', explanation: 'Hold svaret neutralt.' },
+    suggestedReply: 'Jeg vender tilbage om tidspunktet.',
+    uncertainty: highUncertainty
+      ? { level: 'high' as const, missing: ['Aktuel aftale eller afgørelse.'] }
+      : { level: 'medium' as const, missing: ['Aktuel aftale eller afgørelse.'] },
+    citations: [{ sourceId: id, label: 'Aktuel besked', status: 'unknown' as const, locator: 'hele beskeden' }],
+  };
+}
+
+function providerFor(sourceId: (context: Parameters<MessageAnalysisProvider['analyze']>[0]['context']) => string, highUncertainty = true): MessageAnalysisProvider {
   return {
     async analyze({ context }) {
-      const id = sourceId(context);
-      return {
-        summary: 'Beskeden spørger om et ændret tidspunkt.',
-        replyNeeded: ['Svar på tidspunktet.'],
-        canIgnore: [],
-        caseContext: [{ text: 'Den aktuelle besked spørger om torsdag.', sourceIds: [id] }],
-        legalAssessment: {
-          level: 'uncertain',
-          title: 'Kræver sagsgrundlag',
-          explanation: 'Der er ikke leveret en aktuel juridisk kilde, som afgør spørgsmålet.',
-          sourceIds: [id],
-        },
-        communicationAssessment: { title: 'Svar kort', explanation: 'Hold svaret neutralt.' },
-        suggestedReply: 'Jeg vender tilbage om tidspunktet.',
-        uncertainty: { level: 'high', missing: ['Aktuel aftale eller afgørelse.'] },
-        citations: [{ sourceId: id, label: 'Aktuel besked', status: 'unknown', locator: 'hele beskeden' }],
-      };
+      return payloadFor(sourceId(context), highUncertainty);
+    },
+    async review({ context }) {
+      return payloadFor(sourceId(context), false);
     },
   };
 }
@@ -83,17 +91,40 @@ describe('M3c live message analysis', () => {
     expect(db.statements).toHaveLength(0);
   });
 
-  it('uses the incoming message real source ID and persists successful analysis history', async () => {
+  it('uses the incoming message real source ID, performs high-uncertainty review, and persists history', async () => {
     const db = new FakeDb();
     const response = await handleMessageAnalysisRequest(request(), env(db), 'user@example.invalid', () =>
       providerFor((context) => context.sources[0]!.sourceId));
     expect(response.status).toBe(200);
-    const body = await response.json() as { historySaved: boolean; sourceId: string; analysis: { mode: string; citations: Array<{ sourceId: string }> } };
+    const body = await response.json() as {
+      historySaved: boolean;
+      sourceId: string;
+      analysis: { mode: string; reviewPlan: { passes: number; humanReviewRecommended: boolean }; citations: Array<{ sourceId: string }> };
+    };
     expect(body.historySaved).toBe(true);
     expect(body.analysis.mode).toBe('model_analysis');
+    expect(body.analysis.reviewPlan.passes).toBe(2);
+    expect(body.analysis.reviewPlan.humanReviewRecommended).toBe(true);
     expect(body.analysis.citations[0]?.sourceId).toBe(body.sourceId);
     expect(db.batches).toHaveLength(1);
     expect(db.batches[0]?.some((statement) => statement.query.includes("'message'"))).toBe(true);
+  });
+
+  it('keeps ordinary messages to one Sonnet pass', async () => {
+    const db = new FakeDb();
+    let reviewCalled = false;
+    const base = providerFor((context) => context.sources[0]!.sourceId, false);
+    const response = await handleMessageAnalysisRequest(request(), env(db), 'user@example.invalid', () => ({
+      ...base,
+      async review(input) {
+        reviewCalled = true;
+        return base.review(input);
+      },
+    }));
+    expect(response.status).toBe(200);
+    const body = await response.json() as { analysis: { reviewPlan: { passes: number } } };
+    expect(body.analysis.reviewPlan.passes).toBe(1);
+    expect(reviewCalled).toBe(false);
   });
 
   it('rejects fabricated source IDs and does not persist them', async () => {
