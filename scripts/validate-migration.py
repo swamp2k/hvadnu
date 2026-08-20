@@ -19,6 +19,8 @@ expected_tables = {
     "current_state_entries",
     "current_state_sources",
     "current_state_supersedes",
+    "case_source_fts",
+    "ai_usage_events",
 }
 actual_tables = {
     row[0]
@@ -47,12 +49,28 @@ connection.execute("""
     ) VALUES ('source-a', 'case-a', 'document', 'Synthetic source', NULL, 'hash',
               'text/plain', 'text', 10, 10, '{}', '2026-01-01T00:00:00Z')
 """)
-connection.execute("INSERT INTO case_source_chunks (case_id, source_id, chunk_index, page_number, text) VALUES ('case-a', 'source-a', 0, 1, 'synthetic text')")
+connection.execute("INSERT INTO case_source_chunks (case_id, source_id, chunk_index, page_number, text) VALUES ('case-a', 'source-a', 0, 1, 'synthetic samvaer torsdag text')")
 connection.execute("""
     INSERT INTO case_timeline_events (
         id, case_id, occurred_at, source_occurred_at, kind, topic, title, summary, disputed, created_at
     ) VALUES ('event-b', 'case-b', '2026-01-01T00:00:00Z', NULL, 'document', 'test',
               'Synthetic event', 'Synthetic summary', 0, '2026-01-01T00:00:00Z')
+""")
+
+fts_match = connection.execute("""
+    SELECT source_id FROM case_source_fts
+    WHERE case_source_fts MATCH 'samvaer' AND case_id = 'case-a'
+""").fetchone()
+if fts_match is None or fts_match[0] != 'source-a':
+    raise AssertionError("FTS trigger did not index inserted source chunk")
+
+connection.execute("""
+    INSERT INTO ai_usage_events (
+        id, case_id, task_type, model, effort, input_tokens, output_tokens,
+        cache_creation_input_tokens, cache_read_input_tokens, thinking_tokens,
+        latency_ms, context_characters, created_at
+    ) VALUES ('usage-a', 'case-a', 'message_analysis', 'claude-sonnet-5', 'medium',
+              100, 20, 0, 0, 5, 10, 200, '2026-01-01T00:00:00Z')
 """)
 
 try:
@@ -94,5 +112,9 @@ if connection.execute("SELECT COUNT(*) FROM case_sources WHERE case_id = 'case-a
     raise AssertionError("Case source cascade failed")
 if connection.execute("SELECT COUNT(*) FROM case_source_chunks WHERE case_id = 'case-a'").fetchone()[0] != 0:
     raise AssertionError("Source chunk cascade failed")
+if connection.execute("SELECT COUNT(*) FROM ai_usage_events WHERE case_id = 'case-a'").fetchone()[0] != 0:
+    raise AssertionError("AI usage cascade failed")
+if connection.execute("SELECT COUNT(*) FROM case_source_fts WHERE case_id = 'case-a'").fetchone()[0] != 0:
+    raise AssertionError("FTS cleanup trigger failed")
 
 print(f"D1 migration invariants validated across {len(migration_files)} migrations")
