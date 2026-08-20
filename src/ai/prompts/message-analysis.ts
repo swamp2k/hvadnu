@@ -30,4 +30,4 @@ Look specifically for:
 - failure to acknowledge that the user may be wrong;
 - missing reasons to seek qualified human legal review.
 
-Return corrections, not a fresh narrative. If the first analysis is adequately supported, say so explicitly.`;
+Return a complete corrected analysis in the required structured schema. Preserve parts of the first analysis that are well supported, but remove or rewrite unsupported parts. If no correction is needed, return the same supported substance in the complete schema. Never return reviewer commentary outside the structured result.`;
