@@ -1,0 +1,64 @@
+{
+  "caseId": "synthetic-family-001",
+  "notice": "Entirely fictional test data. No names, dates, wording, or facts are derived from a real case.",
+  "people": [
+    { "id": "parent-a", "name": "Anna Testsen", "role": "app_user" },
+    { "id": "parent-b", "name": "Nikolaj Testsen", "role": "other_parent" },
+    { "id": "child-1", "name": "Freja Testsen", "role": "child", "age": 11 },
+    { "id": "child-2", "name": "Emil Testsen", "role": "child", "age": 10 }
+  ],
+  "sources": [
+    {
+      "id": "doc-2023-old-contact",
+      "type": "agreement",
+      "title": "Old contact agreement",
+      "occurredAt": "2023-09-01",
+      "status": "superseded",
+      "supersedesSourceIds": [],
+      "text": "The children stay with Parent B every second weekend from Saturday at 10:00 until Sunday at 18:00."
+    },
+    {
+      "id": "doc-2025-current-contact",
+      "type": "agreement",
+      "title": "Current contact agreement",
+      "occurredAt": "2025-04-12",
+      "status": "current",
+      "supersedesSourceIds": ["doc-2023-old-contact"],
+      "text": "The children stay with Parent B every second weekend from Friday at 17:00 until Sunday at 18:00. Changes require written agreement between the parents."
+    },
+    {
+      "id": "doc-2026-lawyer-proposal",
+      "type": "lawyer_letter",
+      "title": "Proposal from Parent B's lawyer",
+      "occurredAt": "2026-06-03",
+      "status": "unknown",
+      "supersedesSourceIds": [],
+      "text": "Our client proposes that future contact begin Thursday at 16:00. Please confirm whether your client accepts this proposal."
+    },
+    {
+      "id": "msg-2026-08-01-parent-b",
+      "type": "message",
+      "title": "Message from Parent B",
+      "occurredAt": "2026-08-01T19:42:00+02:00",
+      "status": "unknown",
+      "supersedesSourceIds": [],
+      "text": "We agreed that I get them Thursday now. I will pick them up at 16:00 whether you like it or not."
+    },
+    {
+      "id": "msg-2026-08-02-parent-a",
+      "type": "message",
+      "title": "Draft statement from Parent A",
+      "occurredAt": "2026-08-02T09:10:00+02:00",
+      "status": "unknown",
+      "supersedesSourceIds": [],
+      "text": "They have scout camp that weekend, so I am allowed to cancel your weekend."
+    }
+  ],
+  "expectedInferences": [
+    "doc-2025-current-contact is stronger current evidence than doc-2023-old-contact",
+    "doc-2026-lawyer-proposal is a proposal, not proof of an accepted change",
+    "msg-2026-08-01-parent-b contains a claim that is not established merely by the message",
+    "msg-2026-08-02-parent-a must not be accepted merely because Parent A is the app user",
+    "the fixture alone contains no authoritative legal source establishing that scout camp automatically cancels contact"
+  ]
+}
