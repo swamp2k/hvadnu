@@ -44,7 +44,7 @@ describe('buildReviewPlan', () => {
     expect(plan.humanReviewRecommended).toBe(true);
   });
 
-  it('recommends human review when a binding deadline is detected', () => {
+  it('uses a second pass and recommends human review when a binding deadline is detected', () => {
     const plan = buildReviewPlan({
       riskLevel: 'medium',
       legalUncertainty: 'medium',
@@ -53,6 +53,7 @@ describe('buildReviewPlan', () => {
       bindingDeadlineDetected: true,
     });
 
+    expect(plan.passes).toBe(2);
     expect(plan.humanReviewRecommended).toBe(true);
   });
 });
