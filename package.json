@@ -9,10 +9,10 @@
     "check": "npm run typecheck && npm test"
   },
   "dependencies": {
-    "zod": "^4.4.3"
+    "zod": "4.4.3"
   },
   "devDependencies": {
-    "typescript": "^7.0.2",
-    "vitest": "^4.1.10"
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
   }
 }
