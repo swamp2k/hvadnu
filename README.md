@@ -1,60 +1,64 @@
 # Hvad nu?
 
-**Hvad nu?** is a mobile-first decision-support tool for navigating a long-running family-law case while keeping every important conclusion traceable to its source.
+**Hvad nu?** er en lille mobil-first hjælper til svære dokumenter, beskeder og en rodet sagshistorik.
 
-The product is designed for a non-lawyer using only a phone. Its job is to reduce the cognitive load of messages, legal documents, conflicting claims, and years of case history without pretending that an LLM is an autonomous lawyer.
+Målet er ikke at bygge en digital advokat. Målet er at gøre det hurtigt at forstå **hvad der står**, **hvad der er relevant**, og **hvad man kan svare**.
 
-## Product areas
+## Det kan appen
 
-1. **Message assistant** — analyse an incoming message, identify what actually needs a response, check it against the current case state, separate legal assessment from communication strategy, and suggest a short neutral reply.
-2. **Documents** — store originals, explain difficult material in plain language, identify dates/obligations/proposals/decisions, and preserve page-level provenance.
-3. **Current case** — answer “what applies now?” without confusing an old agreement, a lawyer proposal, and a binding/current arrangement.
-4. **Ask everything** — query the whole case across documents, messages, timeline, and current state with source citations.
+### Besked
 
-## Hard safety properties
+Indsæt en modtaget besked og vælg den tone, svaret skal have. Sonnet:
 
-- Original evidence is immutable.
-- Claims, facts, proposals, agreements, decisions, and interpretations are different data types.
-- AI-generated interpretation is never silently promoted to confirmed case state.
-- Model memory is not an authoritative source for current Danish law.
-- Material answers require source provenance.
-- Insufficient evidence must produce uncertainty/abstention rather than invented certainty.
-- The system is allowed to tell the user that the user's own position is unsupported.
-- Retrieved source content is untrusted data, never model instruction.
-- No real case data is permitted in this public repository.
+- læser den aktuelle besked;
+- bruger relevante tidligere beskeder og uploadede dokumenter, hvis de findes;
+- kan søge på nettet i samme request, hvis aktuel lovgivning, offentlig vejledning, tidligere offentliggjorte sager eller anden aktuel information hjælper;
+- foreslår et kort svar;
+- forklarer sin fortolkning og viser de kilder, der blev brugt.
 
-## Model strategy
+Visningen er bevidst enkel:
 
-`claude-sonnet-5` is the only planned reasoning model in the initial architecture. Normal questions use one pass; policy-selected high-risk, uncertain, conflicting, deadline-sensitive, or evidence-insufficient questions receive a separate Sonnet review pass. There is no Opus dependency.
+**Modtaget besked → Forslag til svar → AI fortolkning og analyse**
 
-## Planned stack
+### Dokument
 
-- TypeScript
+Upload PDF, DOCX eller tekst. Dokumentet bliver forklaret i almindeligt dansk med fokus på bl.a.:
+
+- hvad dokumentet faktisk siger;
+- forslag, påstande, aftaler og afgørelser;
+- beløb, handlinger og frister;
+- hvad der er vigtigt at være opmærksom på.
+
+Et dokument kan gemmes i sagen og bruges som kontekst til senere beskeder og spørgsmål.
+
+### Sagen
+
+Sagen viser den eksisterende tidslinje og aktuelle sagsoversigt.
+
+Derudover kan brugeren stille spørgsmål til de gemte beskeder og dokumenter. Hvis der ikke findes relevant materiale i sagen, siger appen det tydeligt og giver i stedet et generelt svar baseret på web search.
+
+## Arkitektur
+
 - React + Vite
-- Cloudflare Worker + Hono
-- D1 with EU jurisdiction for structured case data
-- R2 with EU jurisdiction for private originals
-- Anthropic API
-- Zod for structured contracts
-- Vitest + Playwright
+- Cloudflare Worker
+- Cloudflare Access
+- Cloudflare D1 til gemte beskeder, dokumenttekst, analyser og sagsoversigt
+- Anthropic API med `claude-sonnet-5`
+- Anthropic server-side web search efter behov
+- Zod til strukturerede API-kontrakter
+- Vitest + TypeScript + production build i CI
 
-## Current status
+AI-flowet holdes bevidst simpelt: **ét Sonnet-kald pr. brugerhandling**. Der er ingen reviewer-model, critic-pass eller separat legal-research-agent.
 
-**Milestone 1 — Message assistant (synthetic demo)**
+Det tidligere juridiske referencebibliotek er kun bevaret som historisk migration i Git; migration 0005 fjerner tabellerne fra den aktuelle D1-sluttilstand. Juridisk eller anden aktuel ekstern information findes via Sonnets web search, når det er relevant.
 
-M1 adds the first real mobile UI and the production-shaped analysis result contract. It deliberately uses a deterministic synthetic engine: no text is sent to Claude, no input is stored, and real case data remains prohibited.
+## Datagrænser
 
-Try the two built-in synthetic scenarios to validate the UX and safety behavior. Unknown messages return uncertainty instead of a fabricated answer.
-
-See:
-
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- [`docs/DATA-MODEL.md`](docs/DATA-MODEL.md)
-- [`docs/SECURITY.md`](docs/SECURITY.md)
-- [`docs/AI-SAFETY.md`](docs/AI-SAFETY.md)
-- [`docs/EVALS.md`](docs/EVALS.md)
-- [`docs/M1-MESSAGE-ASSISTANT.md`](docs/M1-MESSAGE-ASSISTANT.md)
-- [`docs/MILESTONES.md`](docs/MILESTONES.md)
+- Reelle sagsdata må aldrig lægges i dette offentlige repository eller i testfixtures.
+- Browseren får aldrig provider-secrets.
+- API-ruter med private sagsdata ligger bag Cloudflare Access.
+- Gemte beskeder og dokumenter er source material; AI-analyse er derived data.
+- AI må ikke automatisk gøre en fortolkning til bekræftet current state.
 
 ## Development
 
@@ -69,6 +73,4 @@ Validation:
 npm run check
 ```
 
-`npm run check` runs TypeScript typechecking, Vitest, and a production Vite build.
-
-Only synthetic data may be used for local/CI development until the real-data security gate is explicitly cleared.
+`npm run check` kører TypeScript typecheck, Vitest og production Vite build.

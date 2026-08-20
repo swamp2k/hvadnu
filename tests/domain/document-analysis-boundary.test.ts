@@ -24,10 +24,7 @@ const documentFixture: ExtractedDocument = {
 const openGate: DocumentAnalysisGate = {
   enabled: true,
   authenticationEnforced: true,
-  privateDeployment: true,
-  anthropicRetentionApproved: true,
   serverSideSecretConfigured: true,
-  payloadLoggingDisabled: true,
 };
 
 const usage = {
@@ -75,17 +72,17 @@ describe('document analysis boundary', () => {
     expect(provider.analyze).not.toHaveBeenCalled();
   });
 
-  it('requires every privacy/security gate before a provider call', async () => {
+  it('requires authentication and a server-side provider key', async () => {
     const provider = validProvider();
-    const service = createDocumentAnalysisService({ ...openGate, payloadLoggingDisabled: false }, provider);
+    const service = createDocumentAnalysisService({ ...openGate, serverSideSecretConfigured: false }, provider);
 
     await expect(service.analyze(documentFixture)).rejects.toMatchObject({
-      blockers: expect.arrayContaining(['payload logging is not confirmed disabled']),
+      blockers: expect.arrayContaining(['server-side Anthropic secret is not configured']),
     });
     expect(provider.analyze).not.toHaveBeenCalled();
   });
 
-  it('passes source text as untrusted prompt data and validates model output', async () => {
+  it('passes source text as data and validates model output', async () => {
     const provider = validProvider();
     const service = createDocumentAnalysisService(openGate, provider);
     const result = await service.analyze(documentFixture);
@@ -97,7 +94,7 @@ describe('document analysis boundary', () => {
     expect(provider.analyze).toHaveBeenCalledWith(expect.objectContaining({
       model: 'claude-sonnet-5',
       prompt: expect.objectContaining({
-        system: expect.stringContaining('untrusted source data'),
+        system: expect.stringContaining('source material'),
         source: expect.objectContaining({
           locators: [{ locator: 'tekstblok 1', text: documentFixture.pages[0]?.text }],
         }),
@@ -105,12 +102,12 @@ describe('document analysis boundary', () => {
     }));
   });
 
-  it('does not let single-document model analysis declare material current or superseded', async () => {
+  it('does not let a single document declare itself current or superseded', async () => {
     for (const status of ['current', 'superseded'] as const) {
       const service = createDocumentAnalysisService(openGate, providerWithStatus(status));
       const result = await service.analyze(documentFixture);
       expect(result.analysis.sourceStatus).toBe('unknown');
-      expect(result.analysis.uncertainty).toContain('Et enkelt dokument kan ikke alene fastslå, om det stadig er gældende eller senere er blevet erstattet.');
+      expect(result.analysis.uncertainty).toContain('Et enkelt dokument kan ikke alene fastslå, om det stadig gælder eller senere er blevet erstattet.');
     }
   });
 

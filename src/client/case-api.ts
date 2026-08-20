@@ -1,3 +1,4 @@
+import { CaseQueryResultSchema, type CaseQueryResult } from '../domain/case-query';
 import { CaseSnapshotSchema, type CaseSnapshot } from '../domain/case-state';
 import { DocumentExplanationSchema, ExtractedDocumentSchema, type DocumentExplanation, type ExtractedDocument } from '../domain/document';
 
@@ -24,6 +25,18 @@ export async function getCaseSnapshot(fetchImpl: typeof fetch = fetch): Promise<
   if (!response.ok) return parseError(response);
   const body = await response.json() as { snapshot?: unknown };
   return CaseSnapshotSchema.parse(body.snapshot);
+}
+
+export async function queryCase(question: string, fetchImpl: typeof fetch = fetch): Promise<CaseQueryResult> {
+  const response = await fetchImpl('/api/case/query', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ question }),
+  });
+  if (!response.ok) return parseError(response);
+  const body = await response.json() as { result?: unknown };
+  return CaseQueryResultSchema.parse(body.result);
 }
 
 export async function saveAnalyzedDocumentToCase(

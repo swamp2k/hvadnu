@@ -16,9 +16,6 @@
   },
   "vars": {
     "DOCUMENT_ANALYSIS_ENABLED": "true",
-    "PRIVATE_DEPLOYMENT_APPROVED": "true",
-    "ANTHROPIC_ZDR_APPROVED": "true",
-    "PAYLOAD_LOGGING_DISABLED": "true",
     "TEAM_DOMAIN": "https://hadus.cloudflareaccess.com",
     "POLICY_AUD": "cbb2332bb7328a5f93247d480307014811f930b173e646852890d7aa85fb4d4a"
   },

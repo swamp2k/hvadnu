@@ -6,6 +6,7 @@ import {
   handleCaseImportDocumentRequest,
   handleCaseSnapshotRequest,
 } from './case-endpoint';
+import { handleCaseQueryRequest } from './case-query-endpoint';
 import {
   handleDocumentAnalysisRequest,
   handleDocumentAnalysisStatusRequest,
@@ -121,6 +122,10 @@ export function createWorker(verifyJwt: AccessJwtVerifier = verifyClassicAccessJ
 
       if (url.pathname === '/api/case') {
         return handleCaseSnapshotRequest(request, env.DB, accessEmail);
+      }
+
+      if (url.pathname === '/api/case/query') {
+        return handleCaseQueryRequest(request, env, accessEmail);
       }
 
       if (url.pathname === '/api/case/import-document') {

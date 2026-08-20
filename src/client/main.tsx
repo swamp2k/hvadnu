@@ -5,6 +5,7 @@ import { PRELOAD_RELOAD_KEY, shouldReloadAfterPreloadError } from './preload-rec
 import './styles.css';
 import './documents.css';
 import './message-history.css';
+import './message-assistant.css';
 
 window.addEventListener('vite:preloadError', (event) => {
   const now = Date.now();

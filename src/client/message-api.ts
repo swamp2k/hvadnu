@@ -1,3 +1,4 @@
+import type { MessageTone } from '../domain/message-tone';
 import { MessageAnalysisResultSchema, MessageHistoryEntrySchema, type MessageAnalysisResult, type MessageHistoryEntry } from '../domain/message-result';
 
 export class MessageApiError extends Error {
@@ -7,36 +8,20 @@ export class MessageApiError extends Error {
   }
 }
 
-export interface MessageWebSearchStatus {
-  requested: boolean;
-  used: boolean;
-  sourceCount: number;
-  failed: boolean;
-}
-
 export async function analyzeMessage(
   message: string,
-  options: { webSearch?: boolean } = {},
-): Promise<{ analysis: MessageAnalysisResult; historySaved: boolean; webSearch: MessageWebSearchStatus }> {
+  options: { tone?: MessageTone } = {},
+): Promise<{ analysis: MessageAnalysisResult; historySaved: boolean }> {
   const response = await fetch('/api/analyze-message', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ message, webSearch: options.webSearch === true }),
+    body: JSON.stringify({ message, tone: options.tone ?? 'neutral' }),
   });
   if (!response.ok) throw new MessageApiError(response.status, 'Beskeden kunne ikke analyseres.');
-  const raw = await response.json() as { analysis?: unknown; historySaved?: unknown; webSearch?: Partial<MessageWebSearchStatus> };
+  const raw = await response.json() as { analysis?: unknown; historySaved?: unknown };
   const analysis = MessageAnalysisResultSchema.parse(raw.analysis);
   if (analysis.mode !== 'model_analysis') throw new MessageApiError(502, 'Serveren returnerede ikke en produktionsanalyse.');
-  return {
-    analysis,
-    historySaved: raw.historySaved === true,
-    webSearch: {
-      requested: raw.webSearch?.requested === true,
-      used: raw.webSearch?.used === true,
-      sourceCount: typeof raw.webSearch?.sourceCount === 'number' ? raw.webSearch.sourceCount : 0,
-      failed: raw.webSearch?.failed === true,
-    },
-  };
+  return { analysis, historySaved: raw.historySaved === true };
 }
 
 export async function getMessageHistory(): Promise<MessageHistoryEntry[]> {

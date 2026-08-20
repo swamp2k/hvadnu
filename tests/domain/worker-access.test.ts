@@ -5,9 +5,6 @@ import type { WorkerEnv } from '../../src/server/document-analysis-endpoint';
 const readyEnv: WorkerEnv = {
   ANTHROPIC_API_KEY: 'synthetic-test-key',
   DOCUMENT_ANALYSIS_ENABLED: 'true',
-  PRIVATE_DEPLOYMENT_APPROVED: 'true',
-  ANTHROPIC_ZDR_APPROVED: 'true',
-  PAYLOAD_LOGGING_DISABLED: 'true',
   TEAM_DOMAIN: 'https://hadus.cloudflareaccess.com',
   POLICY_AUD: 'synthetic-policy-audience',
 };
@@ -23,9 +20,7 @@ describe('Worker Access context boundary', () => {
     const verifyJwt = vi.fn();
     const worker = createWorker(verifyJwt);
     const response = await worker.fetch(statusRequest(), readyEnv, {
-      access: {
-        getIdentity: async () => ({ email: 'authorized-user@example.invalid' }),
-      },
+      access: { getIdentity: async () => ({ email: 'authorized-user@example.invalid' }) },
     });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ available: true });
@@ -64,7 +59,6 @@ describe('Worker Access context boundary', () => {
     const response = await worker.fetch(statusRequest({
       'cf-access-jwt-assertion': 'invalid-access-assertion',
     }), readyEnv, {});
-
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ available: false });
   });
@@ -74,9 +68,7 @@ describe('Worker Access context boundary', () => {
     const worker = createWorker(verifyJwt);
     const response = await worker.fetch(statusRequest({
       'cf-access-jwt-assertion': 'synthetic-access-assertion',
-    }), readyEnv, {
-      access: { getIdentity: async () => null },
-    });
+    }), readyEnv, { access: { getIdentity: async () => null } });
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ available: false });
     expect(verifyJwt).not.toHaveBeenCalled();

@@ -19,3 +19,38 @@
 .timeline-content time, .timeline-content .muted { color:#728079; font-size:11px; white-space:nowrap; }
 .timeline-content p { margin:7px 0 0; color:#4e5d57; line-height:1.45; }
 .disputed-chip { background:#f4e4df; color:#7a4032; }
+
+.case-query {
+  display:grid;
+  gap:11px;
+  margin-bottom:12px;
+}
+.case-query textarea {
+  min-height:76px;
+  resize:vertical;
+}
+.case-query-result {
+  margin-bottom:18px;
+  background:#f6f9f7;
+}
+.case-query-answer {
+  white-space:pre-wrap;
+  line-height:1.55;
+}
+.case-query-badge {
+  display:inline-flex;
+  align-items:center;
+  padding:5px 8px;
+  border-radius:999px;
+  font-size:11px;
+  font-weight:800;
+  white-space:nowrap;
+}
+.case-query-badge-case { background:#e3f1e7; color:#285c39; }
+.case-query-badge-web { background:#e8f1f7; color:#244b65; }
+.case-query-sources {
+  margin-top:14px;
+  padding-top:12px;
+  border-top:1px solid #e1e8e4;
+}
+.case-query-sources summary { cursor:pointer; font-weight:800; }
