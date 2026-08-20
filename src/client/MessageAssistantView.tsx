@@ -119,7 +119,7 @@ export function MessageAssistantView() {
       </form>
       {error && <section className="card error-card" role="alert"><strong>Analyse mislykkedes</strong><p>{error}</p></section>}
       {historyWarning && <section className="card uncertainty-card" role="status"><strong>Historik ikke gemt</strong><p>{historyWarning}</p></section>}
-      {result ? <ResultView result={result} /> : !error && <section className="empty-state"><div className="empty-icon">≡</div><h3>Du får hjælp til at sortere beskeden</h3><p>Vi fremhæver det vigtigste, hvad der kræver svar, og giver et kort forslag til et neutralt svar.</p></section>}
+      {result && <ResultView result={result} />}
       <History entries={history} />
     </>
   );
