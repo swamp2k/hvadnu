@@ -106,17 +106,22 @@ describe('M3d efficient live message analysis', () => {
     expect(db.statements).toHaveLength(0);
   });
 
-  it('does not pay for a second Sonnet pass merely because evidence is uncertain', async () => {
+  it('does not pay for a second Sonnet pass merely because evidence is uncertain or samvær is mentioned', async () => {
     const db = new FakeDb();
     let reviewCalled = false;
     const base = providerFor((context) => context.sources[0]!.sourceId, true);
-    const response = await handleMessageAnalysisRequest(request(), env(db), 'user@example.invalid', () => ({
-      ...base,
-      async review(input) {
-        reviewCalled = true;
-        return base.review(input);
-      },
-    }));
+    const response = await handleMessageAnalysisRequest(
+      request('Kan vi bytte samværsweekend denne ene gang?'),
+      env(db),
+      'user@example.invalid',
+      () => ({
+        ...base,
+        async review(input) {
+          reviewCalled = true;
+          return base.review(input);
+        },
+      }),
+    );
     expect(response.status).toBe(200);
     const body = await response.json() as {
       historySaved: boolean;
