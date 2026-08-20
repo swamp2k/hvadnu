@@ -17,9 +17,12 @@ No extracted content is intentionally transmitted or persisted by Hvad nu? in M2
 ## Safety constraints
 
 - Maximum local file size: 25 MB.
+- DOCX has a stricter 10 MB limit because the compressed container may expand significantly in memory while parsing.
 - Maximum PDF length for local mobile parsing: 300 pages.
 - Scanned/image-only PDFs are detected heuristically when extraction yields very little text and are flagged as requiring OCR/vision.
 - DOCX is converted to raw text only. Untrusted document HTML is never rendered.
+- DOCX raw-text extraction does not preserve reliable physical page numbers, so the UI labels it as a text block rather than inventing page provenance.
+- PDF extraction preserves page boundaries.
 - Extracted source text remains untrusted data and must never become model instruction.
 - Public preview hosts must still be treated as preview environments: do not use real case material there.
 
