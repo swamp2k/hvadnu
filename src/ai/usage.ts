@@ -15,11 +15,11 @@ export interface AiUsageMetadata {
 }
 
 interface AnthropicUsageLike {
-  input_tokens?: number;
-  output_tokens?: number;
-  cache_creation_input_tokens?: number;
-  cache_read_input_tokens?: number;
-  output_tokens_details?: { thinking_tokens?: number } | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  cache_creation_input_tokens?: number | null;
+  cache_read_input_tokens?: number | null;
+  output_tokens_details?: { thinking_tokens?: number | null } | null;
 }
 
 export function toAiUsageMetadata(args: {
