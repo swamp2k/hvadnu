@@ -32,17 +32,20 @@ It is declared in `wrangler.jsonc` as `secrets.required`. A production deploy th
 
 Cloudflare Access is the single source of truth for who may use Hvad nu?. Do not maintain a second user/email allowlist inside the Worker.
 
-The Worker does not trust identity headers supplied on the request. It resolves the authenticated identity from Cloudflare's Worker-native Access context with `ctx.access.getIdentity()`.
+The Worker supports both Cloudflare Access integration modes during the migration period:
 
-Any identity already authorized by the Cloudflare Access policy is accepted by the application. If `ctx.access` is absent, identity lookup fails, or no identity email can be resolved, document analysis remains unavailable and no source text is read or sent to Anthropic.
+1. **Worker-native Access** — if `ctx.access` is present, the Worker resolves the user with `ctx.access.getIdentity()` and never uses a fallback.
+2. **Existing hostname/self-hosted Access** — if `ctx.access` is absent, the Worker takes the Access application token from `Cf-Access-Jwt-Assertion` and asks the reserved same-origin `/cdn-cgi/access/get-identity` endpoint to validate that token. Only a successful Access identity response is accepted.
 
-Changing who may use the application is therefore a Cloudflare Access policy operation only; no Worker secret or redeploy is needed for user changes.
+The application does not trust a copied email header and does not forward unrelated browser cookies during fallback verification. If Worker-native identity lookup fails, or the legacy Access identity endpoint rejects the assertion, analysis remains unavailable and the document body is not read or sent to Anthropic.
+
+Changing who may use the application remains a Cloudflare Access policy operation only; no Worker user list or redeploy is needed for user changes.
 
 ## Status endpoint
 
 `GET /api/analysis-status`
 
-- requires a verified Cloudflare Access identity;
+- requires a verified Cloudflare Access identity through one of the two modes above;
 - never constructs an Anthropic client;
 - never reads a document body;
 - returns only `{ "available": true|false }`;
@@ -57,6 +60,12 @@ Before analysis, extracted text exists only in the browser.
 After the user explicitly taps **Forklar dokumentet**, the extracted text (not the original file bytes) crosses the private Worker/Anthropic boundary. The UI states this distinction explicitly.
 
 The existing limits, ZDR decision, source-status protections, no-payload-logging rule, no-store responses, and source-provenance requirements remain unchanged.
+
+## Deployment/version recovery
+
+PDF.js and other large parsers are lazy-loaded as hashed Vite chunks. A browser tab that remains open across a deployment can therefore reference an asset hash that no longer exists. Vite emits `vite:preloadError` for this case.
+
+The client performs one guarded reload on that event so the browser receives the current asset manifest. A sessionStorage timestamp prevents reload loops if the failure is caused by something other than version skew. Cloudflare Workers Static Assets already serves cacheable assets with immediate revalidation by default.
 
 ## First production activation
 

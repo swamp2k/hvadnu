@@ -198,12 +198,12 @@ export function App() {
           <p className="eyebrow">Hvad nu?</p>
           <h1>{activeArea === 'message' ? 'Beskedhjælp' : 'Dokumenter'}</h1>
         </div>
-        <span className="demo-badge">M2 PREVIEW</span>
+        <span className="demo-badge">M2d PRIVATE TEST</span>
       </header>
 
       <section className="demo-notice" role="note">
-        <strong>Sikker preview-tilstand</strong>
-        <span>Beskedanalysen er syntetisk. Dokumenter parses lokalt i browseren og sendes ikke til Claude eller storage. Brug stadig ikke rigtige sagsdata i en offentlig preview-host.</span>
+        <strong>Privat testtilstand</strong>
+        <span>Beskedanalysen er stadig syntetisk. Dokumenter parses først lokalt. Kun når du trykker “Forklar dokumentet”, sendes den udtrukne tekst til den private Worker og Sonnet 5. Originalfilen uploades ikke, og der er endnu ingen persistence.</span>
       </section>
 
       <nav className="area-tabs" aria-label="Hovedområder">
@@ -213,7 +213,7 @@ export function App() {
 
       {activeArea === 'message' ? <MessageAssistantView /> : <DocumentsView />}
 
-      <footer>M2a · syntetisk analyse + lokal dokument-extraction · ingen produktion eller persistence</footer>
+      <footer>M2d · lokal extraction + privat dokumentanalyse · ingen persistence endnu</footer>
     </main>
   );
 }
