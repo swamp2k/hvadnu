@@ -4,6 +4,7 @@ import type { DocumentExplanation, ExtractedDocument } from '../domain/document'
 import type { D1Database } from './d1-types';
 
 export const PRIMARY_CASE_ID = 'primary-case';
+export const SOURCE_CHUNK_MAX_CHARACTERS = 12_000;
 
 interface TimelineRow {
   id: string;
@@ -43,6 +44,12 @@ interface SupersedesRow {
   superseded_entry_id: string;
 }
 
+export interface PersistedSourceChunk {
+  chunkIndex: number;
+  pageNumber: number | null;
+  text: string;
+}
+
 export interface PersistedCaseSource {
   id: string;
   label: string;
@@ -53,9 +60,9 @@ export interface PersistedCaseSource {
   documentKind: string | null;
   sizeBytes: number | null;
   characterCount: number | null;
-  sourceText: string | null;
   analysisJson: string | null;
   createdAt: string;
+  chunks: PersistedSourceChunk[];
 }
 
 interface SourceRow {
@@ -68,9 +75,15 @@ interface SourceRow {
   document_kind: string | null;
   size_bytes: number | null;
   character_count: number | null;
-  source_text: string | null;
   analysis_json: string | null;
   created_at: string;
+}
+
+interface ChunkRow {
+  source_id: string;
+  chunk_index: number;
+  page_number: number | null;
+  text: string;
 }
 
 export interface CaseExport {
@@ -89,7 +102,19 @@ function textFor(document: ExtractedDocument): string {
   return document.pages.map((page) => page.text).join('\n\n');
 }
 
-function mapSource(row: SourceRow): PersistedCaseSource {
+export function chunksForDocument(document: ExtractedDocument): PersistedSourceChunk[] {
+  const chunks: PersistedSourceChunk[] = [];
+  for (const page of document.pages) {
+    for (let offset = 0; offset < page.text.length; offset += SOURCE_CHUNK_MAX_CHARACTERS) {
+      const text = page.text.slice(offset, offset + SOURCE_CHUNK_MAX_CHARACTERS);
+      if (!text) continue;
+      chunks.push({ chunkIndex: chunks.length, pageNumber: page.pageNumber, text });
+    }
+  }
+  return chunks;
+}
+
+function mapSource(row: SourceRow, chunks: PersistedSourceChunk[]): PersistedCaseSource {
   return {
     id: row.id,
     label: row.label,
@@ -100,9 +125,9 @@ function mapSource(row: SourceRow): PersistedCaseSource {
     documentKind: row.document_kind,
     sizeBytes: row.size_bytes,
     characterCount: row.character_count,
-    sourceText: row.source_text,
     analysisJson: row.analysis_json,
     createdAt: row.created_at,
+    chunks,
   };
 }
 
@@ -116,6 +141,9 @@ export class D1CaseRepository {
     const sourceId = crypto.randomUUID();
     const eventId = crypto.randomUUID();
     const sourceText = textFor(document);
+    if (!sourceText.trim()) throw new Error('empty_source_text');
+    const chunks = chunksForDocument(document);
+    if (chunks.length === 0) throw new Error('empty_source_chunks');
     const immutableSha256 = await sha256Hex(sourceText);
 
     const statements = [
@@ -123,8 +151,8 @@ export class D1CaseRepository {
       this.db.prepare('UPDATE cases SET updated_at = ? WHERE id = ?').bind(now, this.caseId),
       this.db.prepare(`INSERT INTO case_sources (
         id, case_id, source_type, label, occurred_at, immutable_sha256,
-        mime_type, document_kind, size_bytes, character_count, source_text, analysis_json, created_at
-      ) VALUES (?, ?, 'document', ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        mime_type, document_kind, size_bytes, character_count, analysis_json, created_at
+      ) VALUES (?, ?, 'document', ?, NULL, ?, ?, ?, ?, ?, ?, ?)`)
         .bind(
           sourceId,
           this.caseId,
@@ -134,10 +162,13 @@ export class D1CaseRepository {
           document.kind,
           document.sizeBytes,
           sourceText.length,
-          sourceText,
           JSON.stringify(explanation),
           now,
         ),
+      ...chunks.map((chunk) => this.db.prepare(`INSERT INTO case_source_chunks (
+        case_id, source_id, chunk_index, page_number, text
+      ) VALUES (?, ?, ?, ?, ?)`)
+        .bind(this.caseId, sourceId, chunk.chunkIndex, chunk.pageNumber, chunk.text)),
       this.db.prepare(`INSERT INTO case_timeline_events (
         id, case_id, occurred_at, kind, topic, title, summary, disputed, created_at
       ) VALUES (?, ?, NULL, 'document', 'document_import', ?, ?, ?, ?)`)
@@ -238,15 +269,28 @@ export class D1CaseRepository {
   }
 
   async exportCase(): Promise<CaseExport> {
-    const snapshot = await this.getSnapshot();
-    const result = await this.db.prepare(`SELECT id, label, source_type, occurred_at, immutable_sha256,
-      mime_type, document_kind, size_bytes, character_count, source_text, analysis_json, created_at
-      FROM case_sources WHERE case_id = ? ORDER BY created_at ASC`)
-      .bind(this.caseId).all<SourceRow>();
+    const [snapshot, sourceResult, chunkResult] = await Promise.all([
+      this.getSnapshot(),
+      this.db.prepare(`SELECT id, label, source_type, occurred_at, immutable_sha256,
+        mime_type, document_kind, size_bytes, character_count, analysis_json, created_at
+        FROM case_sources WHERE case_id = ? ORDER BY created_at ASC`)
+        .bind(this.caseId).all<SourceRow>(),
+      this.db.prepare(`SELECT source_id, chunk_index, page_number, text
+        FROM case_source_chunks WHERE case_id = ? ORDER BY source_id, chunk_index`)
+        .bind(this.caseId).all<ChunkRow>(),
+    ]);
+
+    const chunksBySource = new Map<string, PersistedSourceChunk[]>();
+    for (const row of chunkResult.results ?? []) {
+      const chunks = chunksBySource.get(row.source_id) ?? [];
+      chunks.push({ chunkIndex: row.chunk_index, pageNumber: row.page_number, text: row.text });
+      chunksBySource.set(row.source_id, chunks);
+    }
+
     return {
       exportedAt: new Date().toISOString(),
       snapshot,
-      sources: (result.results ?? []).map(mapSource),
+      sources: (sourceResult.results ?? []).map((row) => mapSource(row, chunksBySource.get(row.id) ?? [])),
     };
   }
 
