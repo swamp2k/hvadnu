@@ -1,6 +1,8 @@
 import { z } from 'zod';
+import { buildReviewPlan, type ReviewContext, type ReviewPlan } from '../ai/routing';
 import { MessageAnalysisResultSchema, type MessageAnalysisPayload, type MessageAnalysisResult } from '../domain/message-result';
-import { D1MessageHistoryRepository, type MessageAnalysisContext } from '../storage/d1-message-history-repository';
+import { D1AiUsageRepository } from '../storage/d1-ai-usage-repository';
+import { D1MessageHistoryRepository, type MessageAnalysisContext, type MessageContextSource } from '../storage/d1-message-history-repository';
 import type { D1Database } from '../storage/d1-types';
 import { buildRuntimeGate, isAuthenticatedAccessIdentity, type WorkerEnv } from './document-analysis-endpoint';
 import { evaluateDocumentAnalysisGate } from './document-analysis-service';
@@ -8,7 +10,38 @@ import { createAnthropicMessageAnalysisProvider, type MessageAnalysisProvider } 
 
 const MessageRequestSchema = z.object({ message: z.string().trim().min(1).max(20_000) });
 const MAX_MESSAGE_REQUEST_CHARACTERS = 25_000;
+const MAX_REVIEW_SOURCE_CHARACTERS = 8_000;
 export type MessageProviderFactory = (apiKey: string) => MessageAnalysisProvider;
+
+const CRITICAL_PATTERNS = [
+  /\bvold\b/iu,
+  /psykisk\s+vold/iu,
+  /\bovergreb/iu,
+  /seksuel(?:t|le)?\s+overgreb/iu,
+  /\bbortfør/iu,
+  /\bmisbrug\b/iu,
+];
+const HIGH_RISK_PATTERNS = [
+  /samvær/iu,
+  /forældremyndighed/iu,
+  /\bbopæl\b/iu,
+  /familieretshus/iu,
+  /\bretten\b/iu,
+  /\bfoged/iu,
+  /\badvokat/iu,
+  /\bkrav\b/iu,
+  /\bbetaling/iu,
+  /\bøkonomi/iu,
+  /\bejendom/iu,
+  /\bhus(?:et)?\b/iu,
+  /\b\d{4,}\s*(?:kr|kroner)\b/iu,
+];
+const DEADLINE_PATTERNS = [
+  /\bfrist\b/iu,
+  /\bdeadline\b/iu,
+  /\bsenest\b/iu,
+  /\binden\s+\d+\s+(?:dag|dage|uge|uger)\b/iu,
+];
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -20,35 +53,87 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-function assertKnownSourceIds(payload: MessageAnalysisPayload, context: MessageAnalysisContext): void {
-  const known = new Set(context.sources.map((source) => source.sourceId));
-  for (const entry of context.currentState) for (const ref of entry.sourceRefs) known.add(ref.sourceId);
-
+function referencedSourceIds(payload: MessageAnalysisPayload): Set<string> {
   const referenced = new Set<string>();
   for (const item of payload.caseContext) for (const sourceId of item.sourceIds) referenced.add(sourceId);
   for (const sourceId of payload.legalAssessment.sourceIds) referenced.add(sourceId);
   for (const citation of payload.citations) referenced.add(citation.sourceId);
-
-  for (const sourceId of referenced) if (!known.has(sourceId)) throw new Error('fabricated_source_id');
+  return referenced;
 }
 
-function needsSecondPass(payload: MessageAnalysisPayload): boolean {
-  return payload.legalAssessment.level === 'attention' || payload.uncertainty.level === 'high';
+function assertKnownSourceIds(payload: MessageAnalysisPayload, context: MessageAnalysisContext): void {
+  const known = new Set(context.sources.map((source) => source.sourceId));
+  for (const entry of context.currentState) for (const ref of entry.sourceRefs) known.add(ref.sourceId);
+  for (const sourceId of referencedSourceIds(payload)) if (!known.has(sourceId)) throw new Error('fabricated_source_id');
 }
 
-function finalizeAnalysis(payload: MessageAnalysisPayload, passes: 1 | 2, initialRequiredReview: boolean): MessageAnalysisResult {
-  const humanReviewRecommended = initialRequiredReview || payload.legalAssessment.level === 'attention' || payload.uncertainty.level === 'high';
-  const reasons = [
-    ...(passes === 2 ? ['Analysen blev kritisk genvurderet i et separat Sonnet-pass.'] : []),
-    ...(payload.legalAssessment.level === 'attention' ? ['Juridisk vurdering kræver opmærksomhed.'] : []),
-    ...(payload.uncertainty.level === 'high' ? ['Kildegrundlaget har høj usikkerhed.'] : []),
+function matchesAny(value: string, patterns: RegExp[]): boolean {
+  return patterns.some((pattern) => pattern.test(value));
+}
+
+function buildMessageReviewContext(message: string, payload: MessageAnalysisPayload, currentSourceId: string): ReviewContext {
+  const critical = matchesAny(message, CRITICAL_PATTERNS);
+  const highRisk = critical || payload.legalAssessment.level === 'attention' || matchesAny(message, HIGH_RISK_PATTERNS);
+  const externalEvidenceCount = [...referencedSourceIds(payload)].filter((sourceId) => sourceId !== currentSourceId).length;
+  const evidenceSufficiency: ReviewContext['evidenceSufficiency'] = externalEvidenceCount === 0
+    ? 'insufficient'
+    : payload.uncertainty.level === 'low' ? 'sufficient' : 'partial';
+
+  return {
+    riskLevel: critical ? 'critical' : highRisk ? 'high' : 'medium',
+    legalUncertainty: payload.uncertainty.level,
+    evidenceSufficiency,
+    conflictingSources: payload.citations.some((citation) => citation.status === 'disputed'),
+    bindingDeadlineDetected: matchesAny(message, DEADLINE_PATTERNS),
+  };
+}
+
+function narrowReviewContext(context: MessageAnalysisContext, payload: MessageAnalysisPayload, currentSourceId: string): MessageAnalysisContext {
+  const required = referencedSourceIds(payload);
+  required.add(currentSourceId);
+
+  const prioritized = [
+    ...context.sources.filter((source) => required.has(source.sourceId)),
+    ...context.sources.filter((source) => !required.has(source.sourceId)).slice(0, 3),
   ];
+  const seen = new Set<string>();
+  const sources: MessageContextSource[] = [];
+  let used = 0;
 
+  for (const source of prioritized) {
+    const key = `${source.sourceId}:${source.locator}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (source.sourceId === currentSourceId) {
+      sources.push(source);
+      used += source.text.length;
+      continue;
+    }
+    if (used >= MAX_REVIEW_SOURCE_CHARACTERS) break;
+    const remaining = MAX_REVIEW_SOURCE_CHARACTERS - used;
+    const text = source.text.slice(0, remaining);
+    if (!text.trim()) continue;
+    sources.push({ ...source, text });
+    used += text.length;
+  }
+
+  return { currentState: context.currentState, sources };
+}
+
+function finalizeAnalysis(payload: MessageAnalysisPayload, plan: ReviewPlan): MessageAnalysisResult {
   return MessageAnalysisResultSchema.parse({
     ...payload,
     mode: 'model_analysis',
-    reviewPlan: { model: 'claude-sonnet-5', passes, humanReviewRecommended, reasons },
+    reviewPlan: plan,
   });
+}
+
+async function recordUsage(db: D1Database, usage: Parameters<D1AiUsageRepository['record']>[0]): Promise<void> {
+  try {
+    await new D1AiUsageRepository(db).record(usage);
+  } catch {
+    // Metadata telemetry must never make a valid analysis unavailable.
+  }
 }
 
 export async function handleMessageAnalysisRequest(
@@ -80,7 +165,7 @@ export async function handleMessageAnalysisRequest(
   const repository = new D1MessageHistoryRepository(env.DB);
   const sourceId = crypto.randomUUID();
   try {
-    const context = await repository.getAnalysisContext();
+    const context = await repository.getAnalysisContext(parsed.data.message);
     context.sources.unshift({
       sourceId,
       label: 'Aktuel besked',
@@ -91,19 +176,23 @@ export async function handleMessageAnalysisRequest(
     });
 
     const provider = providerFactory(env.ANTHROPIC_API_KEY!);
-    const firstPayload = await provider.analyze({ message: parsed.data.message, context });
-    assertKnownSourceIds(firstPayload, context);
+    const first = await provider.analyze({ context });
+    await recordUsage(env.DB, first.usage);
+    assertKnownSourceIds(first.payload, context);
 
-    const reviewRequired = needsSecondPass(firstPayload);
-    let finalPayload = firstPayload;
-    let passes: 1 | 2 = 1;
-    if (reviewRequired) {
-      finalPayload = await provider.review({ message: parsed.data.message, context, firstAnalysis: firstPayload });
-      assertKnownSourceIds(finalPayload, context);
-      passes = 2;
+    const reviewContext = buildMessageReviewContext(parsed.data.message, first.payload, sourceId);
+    const plan = buildReviewPlan(reviewContext);
+    let finalPayload = first.payload;
+
+    if (plan.passes === 2) {
+      const narrowContext = narrowReviewContext(context, first.payload, sourceId);
+      const reviewed = await provider.review({ context: narrowContext, firstAnalysis: first.payload });
+      await recordUsage(env.DB, reviewed.usage);
+      assertKnownSourceIds(reviewed.payload, narrowContext);
+      finalPayload = reviewed.payload;
     }
 
-    const analysis = finalizeAnalysis(finalPayload, passes, reviewRequired);
+    const analysis = finalizeAnalysis(finalPayload, plan);
     try {
       const saved = await repository.saveAnalyzedMessage(parsed.data.message, analysis, sourceId);
       return json({ analysis, historySaved: true, ...saved });
