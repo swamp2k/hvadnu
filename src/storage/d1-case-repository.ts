@@ -21,6 +21,12 @@ interface TimelineSourceRow {
   source_id: string;
 }
 
+interface SourceSummaryRow {
+  id: string;
+  label: string;
+  source_type: string;
+}
+
 interface StateRow {
   id: string;
   topic: string;
@@ -192,10 +198,12 @@ export class D1CaseRepository {
   async getSnapshot(): Promise<CaseSnapshot> {
     const caseRow = await this.db.prepare('SELECT id, updated_at FROM cases WHERE id = ?').bind(this.caseId).first<{ id: string; updated_at: string }>();
     if (!caseRow) {
-      return CaseSnapshotSchema.parse({ caseId: this.caseId, generatedAt: new Date().toISOString(), timeline: [], currentState: [] });
+      return CaseSnapshotSchema.parse({ caseId: this.caseId, generatedAt: new Date().toISOString(), sources: [], timeline: [], currentState: [] });
     }
 
-    const [timelineResult, timelineSourcesResult, stateResult, stateSourcesResult, supersedesResult] = await Promise.all([
+    const [sourceSummaryResult, timelineResult, timelineSourcesResult, stateResult, stateSourcesResult, supersedesResult] = await Promise.all([
+      this.db.prepare('SELECT id, label, source_type FROM case_sources WHERE case_id = ? ORDER BY created_at ASC')
+        .bind(this.caseId).all<SourceSummaryRow>(),
       this.db.prepare(`SELECT id, occurred_at, kind, title, summary, topic, disputed
         FROM case_timeline_events WHERE case_id = ?
         ORDER BY CASE WHEN occurred_at IS NULL THEN 1 ELSE 0 END, occurred_at DESC, created_at DESC`)
@@ -263,6 +271,7 @@ export class D1CaseRepository {
     return CaseSnapshotSchema.parse({
       caseId: this.caseId,
       generatedAt: caseRow.updated_at,
+      sources: (sourceSummaryResult.results ?? []).map((row) => ({ id: row.id, label: row.label, sourceType: row.source_type })),
       timeline,
       currentState,
     });
