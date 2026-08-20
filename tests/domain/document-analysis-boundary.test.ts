@@ -30,18 +30,34 @@ const openGate: DocumentAnalysisGate = {
   payloadLoggingDisabled: true,
 };
 
+const usage = {
+  taskType: 'document_analysis' as const,
+  model: 'claude-sonnet-5' as const,
+  effort: 'medium' as const,
+  inputTokens: 100,
+  outputTokens: 20,
+  cacheCreationInputTokens: 0,
+  cacheReadInputTokens: 0,
+  thinkingTokens: 5,
+  latencyMs: 10,
+  contextCharacters: 100,
+};
+
 function providerWithStatus(sourceStatus: 'current' | 'superseded' | 'proposal' | 'disputed' | 'unknown' = 'proposal'): DocumentAnalysisProvider {
   return {
     analyze: vi.fn(async () => ({
-      title: 'Syntetisk brev',
-      documentType: 'lawyer_letter',
-      sourceStatus,
-      summary: 'Brevet indeholder et forslag.',
-      whatItMeans: ['Forslaget er ikke i sig selv en aftale.'],
-      actions: [],
-      deadlines: [],
-      importantPassages: [{ text: 'et forslag om ændring', locator: 'tekstblok 1' }],
-      uncertainty: ['Ingen accept er dokumenteret.'],
+      payload: {
+        title: 'Syntetisk brev',
+        documentType: 'lawyer_letter',
+        sourceStatus,
+        summary: 'Brevet indeholder et forslag.',
+        whatItMeans: ['Forslaget er ikke i sig selv en aftale.'],
+        actions: [],
+        deadlines: [],
+        importantPassages: [{ text: 'et forslag om ændring', locator: 'tekstblok 1' }],
+        uncertainty: ['Ingen accept er dokumenteret.'],
+      },
+      usage,
     })),
   };
 }
@@ -74,8 +90,9 @@ describe('document analysis boundary', () => {
     const service = createDocumentAnalysisService(openGate, provider);
     const result = await service.analyze(documentFixture);
 
-    expect(result.mode).toBe('model_analysis');
-    expect(result.sourceStatus).toBe('proposal');
+    expect(result.analysis.mode).toBe('model_analysis');
+    expect(result.analysis.sourceStatus).toBe('proposal');
+    expect(result.usage.effort).toBe('medium');
     expect(provider.analyze).toHaveBeenCalledTimes(1);
     expect(provider.analyze).toHaveBeenCalledWith(expect.objectContaining({
       model: 'claude-sonnet-5',
@@ -92,13 +109,13 @@ describe('document analysis boundary', () => {
     for (const status of ['current', 'superseded'] as const) {
       const service = createDocumentAnalysisService(openGate, providerWithStatus(status));
       const result = await service.analyze(documentFixture);
-      expect(result.sourceStatus).toBe('unknown');
-      expect(result.uncertainty).toContain('Et enkelt dokument kan ikke alene fastslå, om det stadig er gældende eller senere er blevet erstattet.');
+      expect(result.analysis.sourceStatus).toBe('unknown');
+      expect(result.analysis.uncertainty).toContain('Et enkelt dokument kan ikke alene fastslå, om det stadig er gældende eller senere er blevet erstattet.');
     }
   });
 
   it('rejects malformed provider output instead of showing it', async () => {
-    const provider: DocumentAnalysisProvider = { analyze: vi.fn(async () => ({ summary: 'incomplete' })) };
+    const provider: DocumentAnalysisProvider = { analyze: vi.fn(async () => ({ payload: { summary: 'incomplete' }, usage })) };
     const service = createDocumentAnalysisService(openGate, provider);
 
     await expect(service.analyze(documentFixture)).rejects.toThrow();
