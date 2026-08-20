@@ -13,7 +13,7 @@ export const CaseTimelineKindSchema = z.enum([
 
 export const CaseTimelineEventSchema = z.object({
   id: z.string().min(1),
-  occurredAt: z.string().datetime(),
+  occurredAt: z.string().datetime().nullable(),
   kind: CaseTimelineKindSchema,
   title: z.string().min(1),
   summary: z.string().min(1),
