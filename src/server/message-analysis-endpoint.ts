@@ -21,20 +21,14 @@ const CRITICAL_PATTERNS = [
   /\bbortfør/iu,
   /\bmisbrug\b/iu,
 ];
-const HIGH_RISK_PATTERNS = [
-  /samvær/iu,
-  /forældremyndighed/iu,
-  /\bbopæl\b/iu,
-  /familieretshus/iu,
-  /\bretten\b/iu,
-  /\bfoged/iu,
-  /\badvokat/iu,
-  /\bkrav\b/iu,
-  /\bbetaling/iu,
-  /\bøkonomi/iu,
-  /\bejendom/iu,
-  /\bhus(?:et)?\b/iu,
-  /\b\d{4,}\s*(?:kr|kroner)\b/iu,
+const MATERIAL_CHANGE_PATTERNS = [
+  /\b(?:stopper|stoppe|aflyser|aflyse|nægter|nægte|ændrer|ændre|suspenderer|suspendere)\b.{0,80}\bsamvær\b/iu,
+  /\bsamvær\b.{0,80}\b(?:stopper|stoppe|aflyser|aflyse|nægter|nægte|ændrer|ændre|suspenderer|suspendere)\b/iu,
+  /\b(?:ændrer|ændre|flytter|flytte|kræver|kræve|søger|søge)\b.{0,80}\b(?:bopæl|forældremyndighed)\b/iu,
+  /\b(?:bopæl|forældremyndighed)\b.{0,80}\b(?:ændrer|ændre|flytter|flytte|kræver|kræve|søger|søge)\b/iu,
+  /\b(?:krav|betaling|betale|skylder|kompensation)\b.{0,80}\b\d{4,}\s*(?:kr|kroner)\b/iu,
+  /\b\d{4,}\s*(?:kr|kroner)\b.{0,80}\b(?:krav|betaling|betale|skylder|kompensation)\b/iu,
+  /\b(?:ikke|nægter|nægte)\b.{0,60}\b(?:udlevere|aflevere)\b/iu,
 ];
 const DEADLINE_PATTERNS = [
   /\bfrist\b/iu,
@@ -73,7 +67,8 @@ function matchesAny(value: string, patterns: RegExp[]): boolean {
 
 function buildMessageReviewContext(message: string, payload: MessageAnalysisPayload, currentSourceId: string): ReviewContext {
   const critical = matchesAny(message, CRITICAL_PATTERNS);
-  const highRisk = critical || payload.legalAssessment.level === 'attention' || matchesAny(message, HIGH_RISK_PATTERNS);
+  const materialChange = matchesAny(message, MATERIAL_CHANGE_PATTERNS);
+  const highRisk = critical || materialChange || payload.legalAssessment.level === 'attention';
   const externalEvidenceCount = [...referencedSourceIds(payload)].filter((sourceId) => sourceId !== currentSourceId).length;
   const evidenceSufficiency: ReviewContext['evidenceSufficiency'] = externalEvidenceCount === 0
     ? 'insufficient'
