@@ -21,8 +21,7 @@ export const ExtractedDocumentSchema = z.object({
 
 export type ExtractedDocument = z.infer<typeof ExtractedDocumentSchema>;
 
-export const DocumentExplanationSchema = z.object({
-  mode: z.literal('synthetic_demo'),
+export const DocumentExplanationPayloadSchema = z.object({
   title: z.string().min(1),
   documentType: z.enum(['agreement', 'decision', 'lawyer_letter', 'other']),
   sourceStatus: z.enum(['current', 'superseded', 'proposal', 'disputed', 'unknown']),
@@ -34,4 +33,9 @@ export const DocumentExplanationSchema = z.object({
   uncertainty: z.array(z.string()),
 });
 
+export const DocumentExplanationSchema = DocumentExplanationPayloadSchema.extend({
+  mode: z.enum(['synthetic_demo', 'model_analysis']),
+});
+
+export type DocumentExplanationPayload = z.infer<typeof DocumentExplanationPayloadSchema>;
 export type DocumentExplanation = z.infer<typeof DocumentExplanationSchema>;
