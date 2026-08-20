@@ -95,6 +95,7 @@ export function CurrentCaseView() {
       await refresh();
     } catch (cause) {
       setError(caseErrorMessage(cause));
+    } finally {
       setMaintenanceWorking(false);
     }
   }
