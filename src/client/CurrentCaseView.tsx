@@ -62,6 +62,11 @@ export function CurrentCaseView() {
     void refresh();
   }, []);
 
+  const sourceLabels = useMemo(
+    () => new Map((snapshot?.sources ?? []).map((source) => [source.id, source.label])),
+    [snapshot],
+  );
+
   const visibleState = useMemo(
     () => (snapshot?.currentState ?? []).filter((entry) => showSuperseded || entry.status !== 'superseded'),
     [showSuperseded, snapshot],
@@ -150,7 +155,7 @@ export function CurrentCaseView() {
                   </div>
                   <p className="muted">{authorityLabel[entry.authority]} · emne: {entry.topic}</p>
                   <div className="source-links">
-                    {entry.sourceRefs.map((ref) => <span className="source-chip" key={`${entry.id}-${ref.sourceId}`}>{ref.sourceId}</span>)}
+                    {entry.sourceRefs.map((ref) => <span className="source-chip" key={`${entry.id}-${ref.sourceId}`}>{sourceLabels.get(ref.sourceId) ?? ref.sourceId}</span>)}
                   </div>
                   {entry.status === 'candidate' && (
                     <p className="candidate-note">Dette er kun en kandidat. Den må ikke bruges som gældende state uden eksplicit bekræftelse.</p>
@@ -176,7 +181,7 @@ export function CurrentCaseView() {
                     </div>
                     <p>{event.summary}</p>
                     <div className="source-links">
-                      {event.sourceIds.map((sourceId) => <span className="source-chip" key={`${event.id}-${sourceId}`}>{sourceId}</span>)}
+                      {event.sourceIds.map((sourceId) => <span className="source-chip" key={`${event.id}-${sourceId}`}>{sourceLabels.get(sourceId) ?? sourceId}</span>)}
                       {event.disputed && <span className="source-chip disputed-chip">Bestridt</span>}
                     </div>
                   </div>
