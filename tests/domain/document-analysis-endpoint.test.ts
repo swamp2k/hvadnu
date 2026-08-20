@@ -10,7 +10,6 @@ import { createAnthropicDocumentAnalysisProvider } from '../../src/server/anthro
 
 const openEnv: WorkerEnv = {
   ANTHROPIC_API_KEY: 'synthetic-test-key',
-  ALLOWED_EMAIL: 'case-owner@example.invalid',
   DOCUMENT_ANALYSIS_ENABLED: 'true',
   PRIVATE_DEPLOYMENT_APPROVED: 'true',
   ANTHROPIC_ZDR_APPROVED: 'true',
@@ -53,16 +52,28 @@ function validProviderFactory(): ProviderFactory {
 }
 
 describe('M2c document analysis endpoint', () => {
-  it('rejects a verified Access identity that is not allowlisted', async () => {
+  it('rejects requests without a verified Cloudflare Access identity', async () => {
     const factory = validProviderFactory();
     const response = await handleDocumentAnalysisRequest(
       request(JSON.stringify(documentPayload)),
       openEnv,
-      'other@example.invalid',
+      null,
       factory,
     );
     expect(response.status).toBe(401);
     expect(factory).not.toHaveBeenCalled();
+  });
+
+  it('accepts any identity already authorized by Cloudflare Access', async () => {
+    const factory = validProviderFactory();
+    const response = await handleDocumentAnalysisRequest(
+      request(JSON.stringify(documentPayload)),
+      openEnv,
+      'another-authorized-user@example.invalid',
+      factory,
+    );
+    expect(response.status).toBe(200);
+    expect(factory).toHaveBeenCalledWith('synthetic-test-key');
   });
 
   it('keeps the provider closed when ZDR approval is missing', async () => {
