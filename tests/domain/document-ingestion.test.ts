@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { assertLocalDocumentAllowed, detectDocumentKind, MAX_LOCAL_FILE_BYTES } from '../../src/documents/extract-document';
+import {
+  assertLocalDocumentAllowed,
+  detectDocumentKind,
+  MAX_LOCAL_DOCX_BYTES,
+  MAX_LOCAL_FILE_BYTES,
+} from '../../src/documents/extract-document';
 import { explainSyntheticDocument } from '../../src/documents/synthetic-document';
 
 describe('document ingestion contracts', () => {
@@ -13,6 +18,7 @@ describe('document ingestion contracts', () => {
   it('rejects unsupported and oversized files before parsing', () => {
     expect(() => assertLocalDocumentAllowed({ name: 'scan.jpg', type: 'image/jpeg', size: 1200 })).toThrow(/understøttes ikke/u);
     expect(() => assertLocalDocumentAllowed({ name: 'stor.pdf', type: 'application/pdf', size: MAX_LOCAL_FILE_BYTES + 1 })).toThrow(/25 MB/u);
+    expect(() => assertLocalDocumentAllowed({ name: 'stor.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', size: MAX_LOCAL_DOCX_BYTES + 1 })).toThrow(/10 MB/u);
   });
 
   it('keeps the synthetic lawyer letter classified as a proposal', () => {
