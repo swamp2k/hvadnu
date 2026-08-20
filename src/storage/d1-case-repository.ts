@@ -8,7 +8,7 @@ export const SOURCE_CHUNK_MAX_CHARACTERS = 12_000;
 
 interface TimelineRow {
   id: string;
-  occurred_at: string | null;
+  source_occurred_at: string | null;
   kind: CaseTimelineEvent['kind'];
   title: string;
   summary: string;
@@ -176,11 +176,12 @@ export class D1CaseRepository {
       ) VALUES (?, ?, ?, ?, ?)`)
         .bind(this.caseId, sourceId, chunk.chunkIndex, chunk.pageNumber, chunk.text)),
       this.db.prepare(`INSERT INTO case_timeline_events (
-        id, case_id, occurred_at, kind, topic, title, summary, disputed, created_at
-      ) VALUES (?, ?, NULL, 'document', 'document_import', ?, ?, ?, ?)`)
+        id, case_id, occurred_at, source_occurred_at, kind, topic, title, summary, disputed, created_at
+      ) VALUES (?, ?, ?, NULL, 'document', 'document_import', ?, ?, ?, ?)`)
         .bind(
           eventId,
           this.caseId,
+          now,
           explanation.title,
           explanation.summary,
           explanation.sourceStatus === 'disputed' ? 1 : 0,
@@ -204,9 +205,9 @@ export class D1CaseRepository {
     const [sourceSummaryResult, timelineResult, timelineSourcesResult, stateResult, stateSourcesResult, supersedesResult] = await Promise.all([
       this.db.prepare('SELECT id, label, source_type FROM case_sources WHERE case_id = ? ORDER BY created_at ASC')
         .bind(this.caseId).all<SourceSummaryRow>(),
-      this.db.prepare(`SELECT id, occurred_at, kind, title, summary, topic, disputed
+      this.db.prepare(`SELECT id, source_occurred_at, kind, title, summary, topic, disputed
         FROM case_timeline_events WHERE case_id = ?
-        ORDER BY CASE WHEN occurred_at IS NULL THEN 1 ELSE 0 END, occurred_at DESC, created_at DESC`)
+        ORDER BY CASE WHEN source_occurred_at IS NULL THEN 1 ELSE 0 END, source_occurred_at DESC, created_at DESC`)
         .bind(this.caseId).all<TimelineRow>(),
       this.db.prepare('SELECT event_id, source_id FROM timeline_event_sources WHERE case_id = ?').bind(this.caseId).all<TimelineSourceRow>(),
       this.db.prepare(`SELECT id, topic, summary, authority, status, proposed_by, confirmed_by
@@ -247,7 +248,7 @@ export class D1CaseRepository {
 
     const timeline = (timelineResult.results ?? []).map((row) => ({
       id: row.id,
-      occurredAt: row.occurred_at,
+      occurredAt: row.source_occurred_at,
       kind: row.kind,
       title: row.title,
       summary: row.summary,
