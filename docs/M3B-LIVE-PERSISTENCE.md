@@ -8,7 +8,13 @@ Production case persistence uses the existing EU-jurisdiction D1 database:
 - binding: `DB`
 - database id: `a7dbc676-17b2-4a91-87c6-a98565d1ee5b`
 
-The D1 binding is repository configuration. The database is empty until the migration is applied explicitly.
+The D1 binding is repository configuration. The database is empty until the migrations are applied explicitly.
+
+## Migration history
+
+`0001_case_state.sql` is the already-reviewed M3a foundation and remains immutable.
+
+M3b adds `0002_live_document_persistence.sql`, which adds document metadata, page-aware source chunks and a nullable `source_occurred_at` field. The existing non-null `occurred_at` remains the internal event/import timestamp. This keeps unknown source dates genuinely unknown instead of relabeling import time as document chronology.
 
 ## Persistence boundary
 
@@ -32,7 +38,7 @@ Original PDF/DOCX/file bytes are not stored in M3b.
 
 Source chunks are capped at 12,000 characters. This avoids large-row edge cases in D1 and creates the retrieval unit that can later receive FTS5 indexing without rewriting persisted documents.
 
-A document import does **not** create or confirm current-state entries. Unknown document dates remain `NULL`; import time is not presented as the source/event date.
+A document import does **not** create or confirm current-state entries. Unknown document dates remain `NULL` in `source_occurred_at`; import time is not presented as the source/event date.
 
 ## Authentication
 
@@ -53,21 +59,33 @@ The Sagen view exposes explicit full JSON export and full-case deletion. Export 
 
 ## Production migration gate
 
-Do not merge/deploy the D1-bound Worker before the empty production database has migration `0001_case_state.sql` applied.
+Do not merge/deploy the D1-bound Worker before the empty production database has all pending migrations applied.
 
-From the repository root:
+From the M3b branch at repository root:
 
 ```bash
 npx wrangler d1 migrations apply hvadnu-prod --remote
 ```
 
-Then verify:
+Wrangler should apply `0001_case_state.sql` followed by `0002_live_document_persistence.sql` on the currently empty database.
+
+Then verify tables and migration history:
 
 ```bash
 npx wrangler d1 execute hvadnu-prod --remote --command "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
 ```
 
-Only after the expected tables exist should M3b be promoted to `main`.
+```bash
+npx wrangler d1 execute hvadnu-prod --remote --command "SELECT name FROM d1_migrations ORDER BY id;"
+```
+
+Finally verify that no case content exists before promotion:
+
+```bash
+npx wrangler d1 execute hvadnu-prod --remote --command "SELECT (SELECT COUNT(*) FROM cases) AS cases, (SELECT COUNT(*) FROM case_sources) AS sources;"
+```
+
+Expected case/source counts are both zero. Only after the schema and empty state are verified should M3b be promoted to `main`.
 
 ## Next step
 
