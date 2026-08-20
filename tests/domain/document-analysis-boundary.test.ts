@@ -30,12 +30,12 @@ const openGate: DocumentAnalysisGate = {
   payloadLoggingDisabled: true,
 };
 
-function validProvider(): DocumentAnalysisProvider {
+function providerWithStatus(sourceStatus: 'current' | 'superseded' | 'proposal' | 'disputed' | 'unknown' = 'proposal'): DocumentAnalysisProvider {
   return {
     analyze: vi.fn(async () => ({
       title: 'Syntetisk brev',
       documentType: 'lawyer_letter',
-      sourceStatus: 'proposal',
+      sourceStatus,
       summary: 'Brevet indeholder et forslag.',
       whatItMeans: ['Forslaget er ikke i sig selv en aftale.'],
       actions: [],
@@ -44,6 +44,10 @@ function validProvider(): DocumentAnalysisProvider {
       uncertainty: ['Ingen accept er dokumenteret.'],
     })),
   };
+}
+
+function validProvider(): DocumentAnalysisProvider {
+  return providerWithStatus('proposal');
 }
 
 describe('document analysis boundary', () => {
@@ -82,6 +86,15 @@ describe('document analysis boundary', () => {
         }),
       }),
     }));
+  });
+
+  it('does not let single-document model analysis declare material current or superseded', async () => {
+    for (const status of ['current', 'superseded'] as const) {
+      const service = createDocumentAnalysisService(openGate, providerWithStatus(status));
+      const result = await service.analyze(documentFixture);
+      expect(result.sourceStatus).toBe('unknown');
+      expect(result.uncertainty).toContain('Et enkelt dokument kan ikke alene fastslå, om det stadig er gældende eller senere er blevet erstattet.');
+    }
   });
 
   it('rejects malformed provider output instead of showing it', async () => {
