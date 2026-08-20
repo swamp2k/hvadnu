@@ -102,15 +102,15 @@ export function App() {
 
   return (
     <main className="app-shell">
-      <header className="topbar"><div className="brand-mark">?</div><div><p className="eyebrow">Hvad nu?</p><h1>{heading}</h1></div><span className="demo-badge">M3a PRIVATE TEST</span></header>
-      <section className="demo-notice" role="note"><strong>Privat testtilstand</strong><span>Dokumentanalyse er live og privat. M3-sagsoverblikket bruger endnu kun syntetiske data; der er ingen D1-binding eller persistence af rigtige sagsdata i denne branch.</span></section>
+      <header className="topbar"><div className="brand-mark">?</div><div><p className="eyebrow">Hvad nu?</p><h1>{heading}</h1></div><span className="demo-badge">M3b PRIVATE</span></header>
+      <section className="demo-notice" role="note"><strong>Privat testtilstand</strong><span>Dokumentanalyse er live. Et analyseret dokument gemmes kun i den private EU-sagsdatabase, når du aktivt trykker “Gem i sagen”. Originalfilens bytes gemmes ikke; den udtrukne tekst og den validerede analyse gemmes som kildegrundlag.</span></section>
       <nav className="area-tabs" aria-label="Hovedområder">
         <button className={activeArea === 'message' ? 'active' : ''} type="button" onClick={() => setActiveArea('message')}>Besked</button>
         <button className={activeArea === 'documents' ? 'active' : ''} type="button" onClick={() => setActiveArea('documents')}>Dokument</button>
         <button className={activeArea === 'case' ? 'active' : ''} type="button" onClick={() => setActiveArea('case')}>Sagen</button>
       </nav>
       {activeArea === 'message' ? <MessageAssistantView /> : activeArea === 'documents' ? <DocumentsView /> : <CurrentCaseView />}
-      <footer>M3a · syntetisk current-state + timeline · ingen live persistence endnu</footer>
+      <footer>M3b · live EU D1 timeline + eksplicit persistence · current-state promotion er stadig særskilt</footer>
     </main>
   );
 }
