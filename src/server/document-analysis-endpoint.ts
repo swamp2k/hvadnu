@@ -51,6 +51,17 @@ export function isAuthorizedAccessRequest(request: Request, env: WorkerEnv): boo
   return Boolean(allowed && authenticatedEmail && allowed === authenticatedEmail);
 }
 
+export function handleDocumentAnalysisStatusRequest(request: Request, env: WorkerEnv): Response {
+  if (request.method !== 'GET') return json({ error: 'method_not_allowed' }, 405);
+
+  const authenticated = isAuthorizedAccessRequest(request, env);
+  if (!authenticated) return json({ available: false }, 401);
+
+  const gate = buildRuntimeGate(env, authenticated);
+  const evaluation = evaluateDocumentAnalysisGate(gate);
+  return json({ available: evaluation.allowed });
+}
+
 export async function handleDocumentAnalysisRequest(
   request: Request,
   env: WorkerEnv,
@@ -64,7 +75,7 @@ export async function handleDocumentAnalysisRequest(
   const gate = buildRuntimeGate(env, authenticated);
   const evaluation = evaluateDocumentAnalysisGate(gate);
   if (!evaluation.allowed) {
-    return json({ error: 'analysis_unavailable', blockers: evaluation.blockers }, 503);
+    return json({ error: 'analysis_unavailable' }, 503);
   }
 
   const rawBody = await request.text();

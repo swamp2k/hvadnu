@@ -15,8 +15,8 @@
     "run_worker_first": ["/api/*"]
   },
   "vars": {
-    "DOCUMENT_ANALYSIS_ENABLED": "false",
-    "PRIVATE_DEPLOYMENT_APPROVED": "false",
+    "DOCUMENT_ANALYSIS_ENABLED": "true",
+    "PRIVATE_DEPLOYMENT_APPROVED": "true",
     "ANTHROPIC_ZDR_APPROVED": "true",
     "PAYLOAD_LOGGING_DISABLED": "true"
   }

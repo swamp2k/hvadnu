@@ -1,4 +1,8 @@
-import { handleDocumentAnalysisRequest, type WorkerEnv } from './document-analysis-endpoint';
+import {
+  handleDocumentAnalysisRequest,
+  handleDocumentAnalysisStatusRequest,
+  type WorkerEnv,
+} from './document-analysis-endpoint';
 
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
@@ -11,6 +15,10 @@ export default {
           'cache-control': 'no-store',
         },
       });
+    }
+
+    if (url.pathname === '/api/analysis-status') {
+      return handleDocumentAnalysisStatusRequest(request, env);
     }
 
     if (url.pathname === '/api/analyze-document') {
