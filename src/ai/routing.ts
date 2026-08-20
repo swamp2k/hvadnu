@@ -24,37 +24,28 @@ export interface ReviewPlan {
 export function buildReviewPlan(context: ReviewContext): ReviewPlan {
   const reasons: string[] = [];
 
-  const secondPass =
-    context.riskLevel === 'high' ||
-    context.riskLevel === 'critical' ||
-    context.legalUncertainty === 'high' ||
-    context.evidenceSufficiency === 'insufficient' ||
-    context.conflictingSources ||
-    context.bindingDeadlineDetected;
+  // A second model pass cannot manufacture missing evidence. Review is reserved for
+  // cases where the consequence or source conflict makes a reasoning error costly.
+  const highRiskWithInterpretationRisk =
+    context.riskLevel === 'high' &&
+    (context.legalUncertainty === 'high' || context.evidenceSufficiency === 'insufficient');
 
-  if (context.riskLevel === 'high' || context.riskLevel === 'critical') {
-    reasons.push('high-risk outcome');
-  }
-  if (context.legalUncertainty === 'high') {
-    reasons.push('high legal uncertainty');
-  }
-  if (context.evidenceSufficiency === 'insufficient') {
-    reasons.push('insufficient evidence');
-  }
-  if (context.conflictingSources) {
-    reasons.push('conflicting sources');
-  }
-  if (context.bindingDeadlineDetected) {
-    reasons.push('binding or potentially binding deadline');
-  }
+  const secondPass =
+    context.riskLevel === 'critical' ||
+    context.bindingDeadlineDetected ||
+    context.conflictingSources ||
+    highRiskWithInterpretationRisk;
+
+  if (context.riskLevel === 'critical') reasons.push('critical-risk outcome');
+  if (highRiskWithInterpretationRisk) reasons.push('high-risk outcome with material uncertainty');
+  if (context.conflictingSources) reasons.push('conflicting sources');
+  if (context.bindingDeadlineDetected) reasons.push('binding or potentially binding deadline');
 
   const humanReviewRecommended =
     context.riskLevel === 'critical' ||
     context.bindingDeadlineDetected ||
-    (context.riskLevel === 'high' &&
-      (context.legalUncertainty === 'high' ||
-        context.evidenceSufficiency !== 'sufficient' ||
-        context.conflictingSources));
+    highRiskWithInterpretationRisk ||
+    (context.riskLevel === 'high' && context.conflictingSources);
 
   return {
     model: 'claude-sonnet-5',
