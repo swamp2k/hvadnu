@@ -21,23 +21,24 @@ function json(body: unknown, status = 200): Response {
 
 function assertKnownSourceIds(payload: MessageAnalysisPayload, context: MessageAnalysisContext): void {
   const known = new Set(context.sources.map((source) => source.sourceId));
-  for (const entry of context.currentState) {
-    for (const ref of entry.sourceRefs) known.add(ref.sourceId);
-  }
+  for (const entry of context.currentState) for (const ref of entry.sourceRefs) known.add(ref.sourceId);
 
   const referenced = new Set<string>();
   for (const item of payload.caseContext) for (const sourceId of item.sourceIds) referenced.add(sourceId);
   for (const sourceId of payload.legalAssessment.sourceIds) referenced.add(sourceId);
   for (const citation of payload.citations) referenced.add(citation.sourceId);
 
-  for (const sourceId of referenced) {
-    if (!known.has(sourceId)) throw new Error('fabricated_source_id');
-  }
+  for (const sourceId of referenced) if (!known.has(sourceId)) throw new Error('fabricated_source_id');
 }
 
-function finalizeAnalysis(payload: MessageAnalysisPayload): MessageAnalysisResult {
-  const humanReviewRecommended = payload.legalAssessment.level === 'attention' || payload.uncertainty.level === 'high';
+function needsSecondPass(payload: MessageAnalysisPayload): boolean {
+  return payload.legalAssessment.level === 'attention' || payload.uncertainty.level === 'high';
+}
+
+function finalizeAnalysis(payload: MessageAnalysisPayload, passes: 1 | 2, initialRequiredReview: boolean): MessageAnalysisResult {
+  const humanReviewRecommended = initialRequiredReview || payload.legalAssessment.level === 'attention' || payload.uncertainty.level === 'high';
   const reasons = [
+    ...(passes === 2 ? ['Analysen blev kritisk genvurderet i et separat Sonnet-pass.'] : []),
     ...(payload.legalAssessment.level === 'attention' ? ['Juridisk vurdering kræver opmærksomhed.'] : []),
     ...(payload.uncertainty.level === 'high' ? ['Kildegrundlaget har høj usikkerhed.'] : []),
   ];
@@ -45,12 +46,7 @@ function finalizeAnalysis(payload: MessageAnalysisPayload): MessageAnalysisResul
   return MessageAnalysisResultSchema.parse({
     ...payload,
     mode: 'model_analysis',
-    reviewPlan: {
-      model: 'claude-sonnet-5',
-      passes: 1,
-      humanReviewRecommended,
-      reasons,
-    },
+    reviewPlan: { model: 'claude-sonnet-5', passes, humanReviewRecommended, reasons },
   });
 }
 
@@ -91,15 +87,23 @@ export async function handleMessageAnalysisRequest(
     });
 
     const provider = providerFactory(env.ANTHROPIC_API_KEY!);
-    const payload = await provider.analyze({ message: parsed.data.message, context });
-    assertKnownSourceIds(payload, context);
-    const analysis = finalizeAnalysis(payload);
+    const firstPayload = await provider.analyze({ message: parsed.data.message, context });
+    assertKnownSourceIds(firstPayload, context);
 
+    const reviewRequired = needsSecondPass(firstPayload);
+    let finalPayload = firstPayload;
+    let passes: 1 | 2 = 1;
+    if (reviewRequired) {
+      finalPayload = await provider.review({ message: parsed.data.message, context, firstAnalysis: firstPayload });
+      assertKnownSourceIds(finalPayload, context);
+      passes = 2;
+    }
+
+    const analysis = finalizeAnalysis(finalPayload, passes, reviewRequired);
     try {
       const saved = await repository.saveAnalyzedMessage(parsed.data.message, analysis, sourceId);
       return json({ analysis, historySaved: true, ...saved });
     } catch {
-      // The analysis remains useful even if persistence is temporarily unavailable.
       return json({ analysis, historySaved: false });
     }
   } catch (error) {
