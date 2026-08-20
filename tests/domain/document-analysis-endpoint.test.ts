@@ -27,6 +27,19 @@ const documentPayload = {
   warnings: [],
 };
 
+const usage = {
+  taskType: 'document_analysis' as const,
+  model: 'claude-sonnet-5' as const,
+  effort: 'medium' as const,
+  inputTokens: 100,
+  outputTokens: 20,
+  cacheCreationInputTokens: 0,
+  cacheReadInputTokens: 0,
+  thinkingTokens: 5,
+  latencyMs: 10,
+  contextCharacters: 100,
+};
+
 function request(body: string): Request {
   return new Request('https://private.example.invalid/api/analyze-document', {
     method: 'POST',
@@ -38,15 +51,18 @@ function request(body: string): Request {
 function validProviderFactory(): ProviderFactory {
   return vi.fn((): DocumentAnalysisProvider => ({
     analyze: vi.fn(async () => ({
-      title: 'Syntetisk dokument',
-      documentType: 'lawyer_letter',
-      sourceStatus: 'proposal',
-      summary: 'Dokumentet beskriver et forslag.',
-      whatItMeans: ['Forslaget er ikke i sig selv en aftale.'],
-      actions: [],
-      deadlines: [],
-      importantPassages: [{ text: 'syntetisk forslag', locator: 'tekstblok 1' }],
-      uncertainty: ['Ingen accept er dokumenteret.'],
+      payload: {
+        title: 'Syntetisk dokument',
+        documentType: 'lawyer_letter',
+        sourceStatus: 'proposal',
+        summary: 'Dokumentet beskriver et forslag.',
+        whatItMeans: ['Forslaget er ikke i sig selv en aftale.'],
+        actions: [],
+        deadlines: [],
+        importantPassages: [{ text: 'syntetisk forslag', locator: 'tekstblok 1' }],
+        uncertainty: ['Ingen accept er dokumenteret.'],
+      },
+      usage,
     })),
   }));
 }
