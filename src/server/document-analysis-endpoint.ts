@@ -37,12 +37,12 @@ function enabled(value: string | undefined): boolean {
 
 export function buildRuntimeGate(env: WorkerEnv, authenticated: boolean): DocumentAnalysisGate {
   return {
-    authenticated,
-    privateDeploymentApproved: enabled(env.PRIVATE_DEPLOYMENT_APPROVED),
-    retentionApproved: enabled(env.ANTHROPIC_ZDR_APPROVED),
-    serverSideSecretConfigured: Boolean(env.ANTHROPIC_API_KEY),
+    enabled: enabled(env.DOCUMENT_ANALYSIS_ENABLED),
+    authenticationEnforced: authenticated,
+    privateDeployment: enabled(env.PRIVATE_DEPLOYMENT_APPROVED),
+    anthropicRetentionApproved: enabled(env.ANTHROPIC_ZDR_APPROVED),
+    serverSideSecretConfigured: Boolean(env.ANTHROPIC_API_KEY?.trim()),
     payloadLoggingDisabled: enabled(env.PAYLOAD_LOGGING_DISABLED),
-    featureEnabled: enabled(env.DOCUMENT_ANALYSIS_ENABLED),
   };
 }
 
@@ -53,7 +53,7 @@ export function isAuthenticatedAccessIdentity(authenticatedEmail: string | null 
 export function handleDocumentAnalysisStatusRequest(
   request: Request,
   env: WorkerEnv,
-  authenticatedEmail: string | null,
+  authenticatedEmail: string | null | undefined,
 ): Response {
   if (request.method !== 'GET') return json({ error: 'method_not_allowed' }, 405);
 
@@ -61,14 +61,14 @@ export function handleDocumentAnalysisStatusRequest(
   if (!authenticated) return json({ available: false }, 401);
 
   const gate = buildRuntimeGate(env, authenticated);
-  const decision = evaluateDocumentAnalysisGate(gate);
-  return json({ available: decision.allowed });
+  const evaluation = evaluateDocumentAnalysisGate(gate);
+  return json({ available: evaluation.allowed });
 }
 
 export async function handleDocumentAnalysisRequest(
   request: Request,
   env: WorkerEnv,
-  authenticatedEmail: string | null,
+  authenticatedEmail: string | null | undefined,
   providerFactory: ProviderFactory = createAnthropicDocumentAnalysisProvider,
 ): Promise<Response> {
   if (request.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
@@ -77,32 +77,34 @@ export async function handleDocumentAnalysisRequest(
   if (!authenticated) return json({ error: 'unauthorized' }, 401);
 
   const gate = buildRuntimeGate(env, authenticated);
-  const decision = evaluateDocumentAnalysisGate(gate);
-  if (!decision.allowed) return json({ error: 'analysis_unavailable' }, 503);
+  const evaluation = evaluateDocumentAnalysisGate(gate);
+  if (!evaluation.allowed) {
+    return json({ error: 'analysis_unavailable' }, 503);
+  }
 
-  let rawBody: unknown;
+  const rawBody = await request.text();
+  if (rawBody.length > MAX_ANALYSIS_REQUEST_CHARACTERS) {
+    return json({ error: 'request_too_large' }, 413);
+  }
+
+  let parsedJson: unknown;
   try {
-    rawBody = await request.json();
+    parsedJson = JSON.parse(rawBody);
   } catch {
     return json({ error: 'invalid_json' }, 400);
   }
 
-  const parsed = ExtractedDocumentSchema.safeParse(rawBody);
-  if (!parsed.success) return json({ error: 'invalid_document' }, 400);
-
-  const actualCharacterCount = parsed.data.pages.reduce((sum, page) => sum + page.text.length, 0);
-  if (actualCharacterCount > MAX_ANALYSIS_REQUEST_CHARACTERS) {
-    return json({ error: 'document_too_large_for_single_analysis' }, 413);
-  }
-
-  const apiKey = env.ANTHROPIC_API_KEY;
-  if (!apiKey) return json({ error: 'analysis_unavailable' }, 503);
+  const documentResult = ExtractedDocumentSchema.safeParse(parsedJson);
+  if (!documentResult.success) return json({ error: 'invalid_document' }, 400);
 
   try {
-    const service = createDocumentAnalysisService(providerFactory(apiKey));
-    const explanation = await service.analyze(parsed.data, gate);
-    return json(explanation);
-  } catch {
-    return json({ error: 'analysis_failed' }, 502);
+    const provider = providerFactory(env.ANTHROPIC_API_KEY!);
+    const service = createDocumentAnalysisService(gate, provider);
+    const analysis = await service.analyze(documentResult.data);
+    return json({ analysis });
+  } catch (error) {
+    // Never log request/document/model payloads here. Production observability must remain metadata-only.
+    const name = error instanceof Error ? error.name : 'UnknownError';
+    return json({ error: 'analysis_failed', errorType: name }, 502);
   }
 }
