@@ -145,7 +145,6 @@ export function DocumentsView() {
       {extracted && explanation?.mode === 'model_analysis' && (
         <section className="card case-save-card" aria-live="polite"><h3>Gem i sagen</h3><p>Gem dokumentets tekst og forklaring, så det kan bruges sammen med resten af sagen senere.</p><button className="primary-button" type="button" onClick={() => { void handleSave(); }} disabled={saveWorking || Boolean(savedSourceId)}>{savedSourceId ? 'Gemt i sagen' : saveWorking ? 'Gemmer …' : 'Gem i sagen'}</button></section>
       )}
-      {!extracted && !explanation && !error && <section className="empty-state"><div className="empty-icon">▤</div><h3>Vælg et dokument</h3><p>Du får en kort forklaring af indholdet, hvad det betyder, og hvad du eventuelt skal reagere på.</p></section>}
     </>
   );
 }
