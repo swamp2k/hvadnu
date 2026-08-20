@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createWorker } from '../../src/server/worker';
+import { createWorker, verifyClassicAccessJwt } from '../../src/server/worker';
 import type { WorkerEnv } from '../../src/server/document-analysis-endpoint';
 
 const readyEnv: WorkerEnv = {
@@ -8,6 +8,8 @@ const readyEnv: WorkerEnv = {
   PRIVATE_DEPLOYMENT_APPROVED: 'true',
   ANTHROPIC_ZDR_APPROVED: 'true',
   PAYLOAD_LOGGING_DISABLED: 'true',
+  TEAM_DOMAIN: 'https://hadus.cloudflareaccess.com',
+  POLICY_AUD: 'synthetic-policy-audience',
 };
 
 function statusRequest(headers?: HeadersInit): Request {
@@ -18,8 +20,8 @@ function statusRequest(headers?: HeadersInit): Request {
 
 describe('Worker Access context boundary', () => {
   it('accepts an identity already authorized by Worker-native Cloudflare Access', async () => {
-    const fallbackFetch = vi.fn();
-    const worker = createWorker(fallbackFetch);
+    const verifyJwt = vi.fn();
+    const worker = createWorker(verifyJwt);
     const response = await worker.fetch(statusRequest(), readyEnv, {
       access: {
         getIdentity: async () => ({ email: 'authorized-user@example.invalid' }),
@@ -27,38 +29,38 @@ describe('Worker Access context boundary', () => {
     });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ available: true });
-    expect(fallbackFetch).not.toHaveBeenCalled();
+    expect(verifyJwt).not.toHaveBeenCalled();
   });
 
-  it('accepts a legacy hostname Access assertion only after Access validates it', async () => {
-    const fallbackFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = input instanceof Request ? input.url : String(input);
-      expect(url).toBe('https://private.example.invalid/cdn-cgi/access/get-identity');
-      expect(new Headers(init?.headers).get('cookie')).toBe('CF_Authorization=synthetic-access-assertion');
-      return Response.json({ email: 'legacy-user@example.invalid' });
+  it('accepts classic Access only after the assertion is verified for this app', async () => {
+    const verifyJwt = vi.fn(async (token: string, env: WorkerEnv) => {
+      expect(token).toBe('synthetic-access-assertion');
+      expect(env.TEAM_DOMAIN).toBe('https://hadus.cloudflareaccess.com');
+      expect(env.POLICY_AUD).toBe('synthetic-policy-audience');
+      return 'classic-user@example.invalid';
     });
-    const worker = createWorker(fallbackFetch);
+    const worker = createWorker(verifyJwt);
     const response = await worker.fetch(statusRequest({
       'cf-access-jwt-assertion': 'synthetic-access-assertion',
     }), readyEnv, {});
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ available: true });
-    expect(fallbackFetch).toHaveBeenCalledOnce();
+    expect(verifyJwt).toHaveBeenCalledOnce();
   });
 
-  it('fails closed when neither Worker-native nor legacy Access proof is present', async () => {
-    const fallbackFetch = vi.fn();
-    const worker = createWorker(fallbackFetch);
+  it('fails closed when neither Worker-native nor classic Access proof is present', async () => {
+    const verifyJwt = vi.fn();
+    const worker = createWorker(verifyJwt);
     const response = await worker.fetch(statusRequest(), readyEnv, {});
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ available: false });
-    expect(fallbackFetch).not.toHaveBeenCalled();
+    expect(verifyJwt).not.toHaveBeenCalled();
   });
 
-  it('fails closed when legacy Access rejects the current assertion', async () => {
-    const fallbackFetch = vi.fn(async () => new Response('Unauthorized', { status: 401 }));
-    const worker = createWorker(fallbackFetch);
+  it('fails closed when classic Access JWT verification rejects the assertion', async () => {
+    const verifyJwt = vi.fn(async () => null);
+    const worker = createWorker(verifyJwt);
     const response = await worker.fetch(statusRequest({
       'cf-access-jwt-assertion': 'invalid-access-assertion',
     }), readyEnv, {});
@@ -68,8 +70,8 @@ describe('Worker Access context boundary', () => {
   });
 
   it('fails closed when Worker-native Access ran but no identity can be resolved', async () => {
-    const fallbackFetch = vi.fn();
-    const worker = createWorker(fallbackFetch);
+    const verifyJwt = vi.fn(async () => 'must-not-be-used@example.invalid');
+    const worker = createWorker(verifyJwt);
     const response = await worker.fetch(statusRequest({
       'cf-access-jwt-assertion': 'synthetic-access-assertion',
     }), readyEnv, {
@@ -77,6 +79,14 @@ describe('Worker Access context boundary', () => {
     });
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ available: false });
-    expect(fallbackFetch).not.toHaveBeenCalled();
+    expect(verifyJwt).not.toHaveBeenCalled();
+  });
+
+  it('fails closed before JWKS lookup when classic Access app metadata is missing', async () => {
+    expect(await verifyClassicAccessJwt('synthetic-token', {})).toBeNull();
+    expect(await verifyClassicAccessJwt('synthetic-token', {
+      TEAM_DOMAIN: 'http://not-https.example.invalid',
+      POLICY_AUD: 'aud',
+    })).toBeNull();
   });
 });

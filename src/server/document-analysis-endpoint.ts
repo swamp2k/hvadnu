@@ -15,6 +15,8 @@ export interface WorkerEnv {
   PRIVATE_DEPLOYMENT_APPROVED?: string;
   ANTHROPIC_ZDR_APPROVED?: string;
   PAYLOAD_LOGGING_DISABLED?: string;
+  TEAM_DOMAIN?: string;
+  POLICY_AUD?: string;
 }
 
 export type ProviderFactory = (apiKey: string) => DocumentAnalysisProvider;
