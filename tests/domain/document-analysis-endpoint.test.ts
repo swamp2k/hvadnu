@@ -28,13 +28,10 @@ const documentPayload = {
   warnings: [],
 };
 
-function request(body: string, email = 'case-owner@example.invalid'): Request {
+function request(body: string): Request {
   return new Request('https://private.example.invalid/api/analyze-document', {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'cf-access-authenticated-user-email': email,
-    },
+    headers: { 'content-type': 'application/json' },
     body,
   });
 }
@@ -56,19 +53,26 @@ function validProviderFactory(): ProviderFactory {
 }
 
 describe('M2c document analysis endpoint', () => {
-  it('rejects requests that did not pass the allowlisted Cloudflare Access identity', async () => {
+  it('rejects a verified Access identity that is not allowlisted', async () => {
     const factory = validProviderFactory();
-    const response = await handleDocumentAnalysisRequest(request(JSON.stringify(documentPayload), 'other@example.invalid'), openEnv, factory);
+    const response = await handleDocumentAnalysisRequest(
+      request(JSON.stringify(documentPayload)),
+      openEnv,
+      'other@example.invalid',
+      factory,
+    );
     expect(response.status).toBe(401);
     expect(factory).not.toHaveBeenCalled();
   });
 
   it('keeps the provider closed when ZDR approval is missing', async () => {
     const factory = validProviderFactory();
-    const response = await handleDocumentAnalysisRequest(request(JSON.stringify(documentPayload)), {
-      ...openEnv,
-      ANTHROPIC_ZDR_APPROVED: 'false',
-    }, factory);
+    const response = await handleDocumentAnalysisRequest(
+      request(JSON.stringify(documentPayload)),
+      { ...openEnv, ANTHROPIC_ZDR_APPROVED: 'false' },
+      'case-owner@example.invalid',
+      factory,
+    );
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({ error: 'analysis_unavailable' });
     expect(factory).not.toHaveBeenCalled();
@@ -76,7 +80,12 @@ describe('M2c document analysis endpoint', () => {
 
   it('returns validated structured analysis when every runtime gate is open', async () => {
     const factory = validProviderFactory();
-    const response = await handleDocumentAnalysisRequest(request(JSON.stringify(documentPayload)), openEnv, factory);
+    const response = await handleDocumentAnalysisRequest(
+      request(JSON.stringify(documentPayload)),
+      openEnv,
+      'case-owner@example.invalid',
+      factory,
+    );
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
       analysis: {
@@ -89,7 +98,12 @@ describe('M2c document analysis endpoint', () => {
 
   it('rejects an oversized request before provider construction', async () => {
     const factory = validProviderFactory();
-    const response = await handleDocumentAnalysisRequest(request('x'.repeat(MAX_ANALYSIS_REQUEST_CHARACTERS + 1)), openEnv, factory);
+    const response = await handleDocumentAnalysisRequest(
+      request('x'.repeat(MAX_ANALYSIS_REQUEST_CHARACTERS + 1)),
+      openEnv,
+      'case-owner@example.invalid',
+      factory,
+    );
     expect(response.status).toBe(413);
     expect(factory).not.toHaveBeenCalled();
   });

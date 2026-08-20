@@ -1,7 +1,12 @@
-import { useMemo, useState, type ChangeEvent } from 'react';
+import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import type { DocumentExplanation, ExtractedDocument } from '../domain/document';
 import { extractDocumentLocally } from '../documents/extract-document';
 import { explainSyntheticDocument, SYNTHETIC_DOCUMENT_TEXT } from '../documents/synthetic-document';
+import {
+  analyzeDocument,
+  DocumentAnalysisApiError,
+  getDocumentAnalysisStatus,
+} from './document-analysis-api';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -60,12 +65,30 @@ function Explanation({ explanation }: { explanation: DocumentExplanation }) {
   );
 }
 
-function ExtractionPreview({ document }: { document: ExtractedDocument }) {
+interface ExtractionPreviewProps {
+  document: ExtractedDocument;
+  analysisAvailable: boolean | null;
+  analysisWorking: boolean;
+  onAnalyze: () => void;
+}
+
+function ExtractionPreview({ document, analysisAvailable, analysisWorking, onAnalyze }: ExtractionPreviewProps) {
   const text = useMemo(() => document.pages.map((page) => page.text).filter(Boolean).join('\n\n'), [document]);
   const preview = text.slice(0, 6000);
   const structureLabel = document.kind === 'pdf'
     ? `${document.pageCount} ${document.pageCount === 1 ? 'side' : 'sider'}`
     : '1 tekstblok';
+  const hasText = document.characterCount > 0;
+  const canAnalyze = analysisAvailable === true && hasText && !analysisWorking;
+
+  let analysisMessage = 'Tjekker om den private AI-analyse er klar …';
+  if (!hasText) {
+    analysisMessage = 'Der er ingen maskinlæsbar tekst at sende til analyse. Dokumentet kræver OCR/vision først.';
+  } else if (analysisAvailable === false) {
+    analysisMessage = 'AI-analysen er ikke klar på serveren endnu. Dokumentet bliver på telefonen.';
+  } else if (analysisAvailable === true) {
+    analysisMessage = 'Kun den udtrukne tekst sendes til den private Hvad nu?-API og Sonnet 5. Originalfilen uploades ikke.';
+  }
 
   return (
     <section className="document-stack" aria-live="polite">
@@ -92,30 +115,53 @@ function ExtractionPreview({ document }: { document: ExtractedDocument }) {
       )}
 
       <article className="card extracted-text-card">
-        <div className="section-title-row"><h3>Udtrukket tekst</h3><span className="local-only-badge">Kun lokalt</span></div>
+        <div className="section-title-row"><h3>Udtrukket tekst</h3><span className="local-only-badge">Kun lokalt indtil analyse</span></div>
         {preview ? <pre>{preview}{text.length > preview.length ? '\n\n… preview afkortet' : ''}</pre> : <p className="muted">Ingen maskinlæsbar tekst fundet.</p>}
       </article>
 
       <article className="card locked-analysis-card">
         <h3>Forklar dokumentet</h3>
-        <p>For vilkårlige dokumenter stopper M2a her. Teksten bliver ikke sendt til en model, før Anthropic-retention og den private data-path er godkendt og implementeret.</p>
-        <button className="primary-button" type="button" disabled>AI-analyse ikke aktiveret endnu</button>
+        <p>{analysisMessage}</p>
+        <button className="primary-button" type="button" disabled={!canAnalyze} onClick={onAnalyze}>
+          {analysisWorking ? 'Analyserer …' : 'Forklar dokumentet'}
+        </button>
       </article>
     </section>
   );
+}
+
+function analysisErrorMessage(error: unknown): string {
+  if (error instanceof DocumentAnalysisApiError) {
+    if (error.status === 401) return 'AI-adgangen er ikke konfigureret til denne bruger endnu.';
+    if (error.status === 413) return 'Dokumentet er for stort til denne analysevej.';
+    if (error.status === 503 || error.code === 'analysis_unavailable') return 'AI-analysen er ikke klar på serveren endnu.';
+  }
+  return 'Dokumentet kunne ikke analyseres. Ingen analyse er gemt; prøv igen senere.';
 }
 
 export function DocumentsView() {
   const [extracted, setExtracted] = useState<ExtractedDocument | null>(null);
   const [explanation, setExplanation] = useState<DocumentExplanation | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
+  const [analysisWorking, setAnalysisWorking] = useState(false);
+  const [analysisAvailable, setAnalysisAvailable] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getDocumentAnalysisStatus().then((status) => {
+      if (!cancelled) setAnalysisAvailable(status.available);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   async function handleFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
     setWorking(true);
     setError(null);
+    setAnalysisError(null);
     setExplanation(null);
     setExtracted(null);
     try {
@@ -128,9 +174,27 @@ export function DocumentsView() {
     }
   }
 
+  async function handleAnalyze() {
+    if (!extracted || analysisAvailable !== true) return;
+    setAnalysisWorking(true);
+    setAnalysisError(null);
+    setExplanation(null);
+    try {
+      setExplanation(await analyzeDocument(extracted));
+    } catch (cause) {
+      setAnalysisError(analysisErrorMessage(cause));
+      if (cause instanceof DocumentAnalysisApiError && (cause.status === 401 || cause.status === 503)) {
+        setAnalysisAvailable(false);
+      }
+    } finally {
+      setAnalysisWorking(false);
+    }
+  }
+
   function loadSyntheticExplanation() {
     setExtracted(null);
     setError(null);
+    setAnalysisError(null);
     setExplanation(explainSyntheticDocument());
   }
 
@@ -138,17 +202,17 @@ export function DocumentsView() {
     <>
       <section className="intro">
         <h2>Hvad står der egentlig?</h2>
-        <p>Læs et dokument lokalt på telefonen, eller prøv den syntetiske forklaring for at se den kommende analyseform.</p>
+        <p>Dokumentet læses først lokalt på telefonen. Når AI er aktiveret, kan den udtrukne tekst sendes videre til en kildebevarende Sonnet-analyse.</p>
       </section>
 
       <section className="document-upload card">
         <label className="upload-button">
           <span>{working ? 'Læser dokument …' : 'Vælg PDF, DOCX eller tekst'}</span>
-          <input type="file" accept=".pdf,.docx,.txt,.md,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={handleFile} disabled={working} />
+          <input type="file" accept=".pdf,.docx,.txt,.md,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={handleFile} disabled={working || analysisWorking} />
         </label>
-        <p className="muted compact">Maks. 25 MB generelt, 10 MB for DOCX og 300 PDF-sider i den lokale mobil-preview. Ingen fil eller tekst sendes fra browseren.</p>
+        <p className="muted compact">Maks. 25 MB generelt, 10 MB for DOCX og 300 PDF-sider i den lokale mobil-preview. Originalfilen forlader ikke browseren.</p>
         <div className="document-demo-separator"><span>eller</span></div>
-        <button className="secondary-button" type="button" onClick={loadSyntheticExplanation}>Prøv syntetisk advokatbrev</button>
+        <button className="secondary-button" type="button" onClick={loadSyntheticExplanation} disabled={analysisWorking}>Prøv syntetisk advokatbrev</button>
         <details className="synthetic-raw">
           <summary>Se teksten i det syntetiske dokument</summary>
           <pre>{SYNTHETIC_DOCUMENT_TEXT}</pre>
@@ -156,14 +220,22 @@ export function DocumentsView() {
       </section>
 
       {error && <section className="card error-card" role="alert"><strong>Kunne ikke læse dokumentet</strong><p>{error}</p></section>}
-      {extracted && <ExtractionPreview document={extracted} />}
+      {analysisError && <section className="card error-card" role="alert"><strong>Kunne ikke analysere dokumentet</strong><p>{analysisError}</p></section>}
+      {extracted && (
+        <ExtractionPreview
+          document={extracted}
+          analysisAvailable={analysisAvailable}
+          analysisWorking={analysisWorking}
+          onAnalyze={() => { void handleAnalyze(); }}
+        />
+      )}
       {explanation && <Explanation explanation={explanation} />}
 
       {!extracted && !explanation && !error && (
         <section className="empty-state">
           <div className="empty-icon">▤</div>
           <h3>Original først, forklaring bagefter</h3>
-          <p>M2 holder extraction og fortolkning adskilt, så en AI-opsummering aldrig bliver forvekslet med selve dokumentet.</p>
+          <p>Extraction og fortolkning er adskilt, så en AI-opsummering aldrig bliver forvekslet med selve dokumentet.</p>
         </section>
       )}
     </>
