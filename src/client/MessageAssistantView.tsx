@@ -62,11 +62,11 @@ function History({ entries }: { entries: MessageHistoryEntry[] }) {
         {entries.map((entry) => <details className="card history-item" key={entry.id}>
           <summary>
             <span className="history-date">{new Date(entry.createdAt).toLocaleString('da-DK')}</span>
-            <span className="history-preview history-reply-preview">{entry.analysis.suggestedReply}</span>
+            <span className="history-preview history-message-preview">{entry.message}</span>
           </summary>
           <div className="history-detail-list">
-            <div className="history-block history-reply"><strong>Forslag til svar</strong><p>{entry.analysis.suggestedReply}</p></div>
             <div className="history-block history-message"><strong>Modtaget besked</strong><p>{entry.message}</p></div>
+            <div className="history-block history-reply"><strong>Forslag til svar</strong><p>{entry.analysis.suggestedReply}</p></div>
             <div className="history-block history-analysis"><strong>Analyse</strong><p>{entry.analysis.summary}</p></div>
           </div>
         </details>)}

@@ -36,7 +36,7 @@
   font-weight: 700;
 }
 
-.history-reply-preview {
+.history-message-preview {
   padding: 10px 12px;
   border-radius: 12px;
   background: #e3f1e7;
@@ -55,6 +55,6 @@
 }
 .history-block strong { display: block; margin-bottom: 5px; }
 .history-block p { margin: 0; line-height: 1.5; }
-.history-reply { background: #e3f1e7; color: #285c39; }
-.history-message { background: #e8f1f7; color: #244b65; }
+.history-message { background: #e3f1e7; color: #285c39; }
+.history-reply { background: #e8f1f7; color: #244b65; }
 .history-analysis { background: #f8efc7; color: #66551b; }
