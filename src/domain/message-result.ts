@@ -21,8 +21,7 @@ export const MessageCitationSchema = z.object({
   locator: z.string().min(1).optional(),
 });
 
-export const MessageAnalysisResultSchema = z.object({
-  mode: z.literal('synthetic_demo'),
+const MessageAnalysisCoreSchema = z.object({
   summary: z.string().min(1),
   replyNeeded: z.array(z.string().min(1)),
   canIgnore: z.array(z.string().min(1)),
@@ -45,14 +44,31 @@ export const MessageAnalysisResultSchema = z.object({
     level: z.enum(['low', 'medium', 'high']),
     missing: z.array(z.string().min(1)),
   }),
+  citations: z.array(MessageCitationSchema),
+});
+
+export const MessageAnalysisPayloadSchema = MessageAnalysisCoreSchema;
+
+export const MessageAnalysisResultSchema = MessageAnalysisCoreSchema.extend({
+  mode: z.enum(['synthetic_demo', 'model_analysis']),
   reviewPlan: z.object({
     model: z.literal('claude-sonnet-5'),
     passes: z.union([z.literal(1), z.literal(2)]),
     humanReviewRecommended: z.boolean(),
     reasons: z.array(z.string()),
   }),
-  citations: z.array(MessageCitationSchema),
 });
 
+export const MessageHistoryEntrySchema = z.object({
+  id: z.string().min(1),
+  createdAt: z.string().datetime(),
+  message: z.string().min(1),
+  analysis: MessageAnalysisResultSchema.refine((value) => value.mode === 'model_analysis', {
+    message: 'Message history may only contain production model analyses.',
+  }),
+});
+
+export type MessageAnalysisPayload = z.infer<typeof MessageAnalysisPayloadSchema>;
 export type MessageAnalysisResult = z.infer<typeof MessageAnalysisResultSchema>;
 export type MessageCitation = z.infer<typeof MessageCitationSchema>;
+export type MessageHistoryEntry = z.infer<typeof MessageHistoryEntrySchema>;
