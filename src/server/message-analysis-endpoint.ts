@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { MessageAnalysisResultSchema, type MessageAnalysisResult } from '../domain/message-result';
-import { D1MessageHistoryRepository } from '../storage/d1-message-history-repository';
+import { MessageAnalysisResultSchema, type MessageAnalysisPayload, type MessageAnalysisResult } from '../domain/message-result';
+import { D1MessageHistoryRepository, type MessageAnalysisContext } from '../storage/d1-message-history-repository';
 import type { D1Database } from '../storage/d1-types';
 import { buildRuntimeGate, isAuthenticatedAccessIdentity, type WorkerEnv } from './document-analysis-endpoint';
 import { evaluateDocumentAnalysisGate } from './document-analysis-service';
@@ -19,7 +19,23 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-function finalizeAnalysis(payload: Awaited<ReturnType<MessageAnalysisProvider['analyze']>>): MessageAnalysisResult {
+function assertKnownSourceIds(payload: MessageAnalysisPayload, context: MessageAnalysisContext): void {
+  const known = new Set(context.sources.map((source) => source.sourceId));
+  for (const entry of context.currentState) {
+    for (const ref of entry.sourceRefs) known.add(ref.sourceId);
+  }
+
+  const referenced = new Set<string>();
+  for (const item of payload.caseContext) for (const sourceId of item.sourceIds) referenced.add(sourceId);
+  for (const sourceId of payload.legalAssessment.sourceIds) referenced.add(sourceId);
+  for (const citation of payload.citations) referenced.add(citation.sourceId);
+
+  for (const sourceId of referenced) {
+    if (!known.has(sourceId)) throw new Error('fabricated_source_id');
+  }
+}
+
+function finalizeAnalysis(payload: MessageAnalysisPayload): MessageAnalysisResult {
   const humanReviewRecommended = payload.legalAssessment.level === 'attention' || payload.uncertainty.level === 'high';
   const reasons = [
     ...(payload.legalAssessment.level === 'attention' ? ['Juridisk vurdering kræver opmærksomhed.'] : []),
@@ -62,13 +78,25 @@ export async function handleMessageAnalysisRequest(
   if (!parsed.success) return json({ error: 'invalid_message' }, 400);
 
   const repository = new D1MessageHistoryRepository(env.DB);
+  const sourceId = crypto.randomUUID();
   try {
     const context = await repository.getAnalysisContext();
+    context.sources.unshift({
+      sourceId,
+      label: 'Aktuel besked',
+      sourceType: 'message',
+      locator: 'hele beskeden',
+      text: parsed.data.message,
+      status: 'unknown',
+    });
+
     const provider = providerFactory(env.ANTHROPIC_API_KEY!);
-    const analysis = finalizeAnalysis(await provider.analyze({ message: parsed.data.message, context }));
+    const payload = await provider.analyze({ message: parsed.data.message, context });
+    assertKnownSourceIds(payload, context);
+    const analysis = finalizeAnalysis(payload);
 
     try {
-      const saved = await repository.saveAnalyzedMessage(parsed.data.message, analysis);
+      const saved = await repository.saveAnalyzedMessage(parsed.data.message, analysis, sourceId);
       return json({ analysis, historySaved: true, ...saved });
     } catch {
       // The analysis remains useful even if persistence is temporarily unavailable.
