@@ -32,14 +32,21 @@ It is declared in `wrangler.jsonc` as `secrets.required`. A production deploy th
 
 Cloudflare Access is the single source of truth for who may use Hvad nu?. Do not maintain a second user/email allowlist inside the Worker.
 
-The Worker supports both Cloudflare Access integration modes during the migration period:
+The Worker supports both Cloudflare Access integration modes:
 
 1. **Worker-native Access** — if `ctx.access` is present, the Worker resolves the user with `ctx.access.getIdentity()` and never uses a fallback.
-2. **Existing hostname/self-hosted Access** — if `ctx.access` is absent, the Worker takes the Access application token from `Cf-Access-Jwt-Assertion` and asks the reserved same-origin `/cdn-cgi/access/get-identity` endpoint to validate that token. Only a successful Access identity response is accepted.
+2. **Classic/self-hosted Access** — if `ctx.access` is absent, the Worker reads `Cf-Access-Jwt-Assertion` and cryptographically verifies the application token using Cloudflare's account signing keys. Verification requires the configured team-domain issuer and this Access application's AUD tag.
 
-The application does not trust a copied email header and does not forward unrelated browser cookies during fallback verification. If Worker-native identity lookup fails, or the legacy Access identity endpoint rejects the assertion, analysis remains unavailable and the document body is not read or sent to Anthropic.
+Classic verification follows Cloudflare's Worker guidance and uses `jose` with:
 
-Changing who may use the application remains a Cloudflare Access policy operation only; no Worker user list or redeploy is needed for user changes.
+- JWKS: `https://hadus.cloudflareaccess.com/cdn-cgi/access/certs`
+- issuer: `https://hadus.cloudflareaccess.com`
+- application audience: the configured `POLICY_AUD`
+- algorithm: `RS256`
+
+`TEAM_DOMAIN` and `POLICY_AUD` are application identifiers, not user authorization rules or secrets. Changing who may use the application remains a Cloudflare Access policy operation only.
+
+The application never trusts a copied email header. If Worker-native identity lookup fails, the Access token is absent, the signature/issuer/audience check fails, or no email claim is present, analysis remains unavailable and the document body is not read or sent to Anthropic.
 
 ## Status endpoint
 
@@ -65,14 +72,15 @@ The existing limits, ZDR decision, source-status protections, no-payload-logging
 
 PDF.js and other large parsers are lazy-loaded as hashed Vite chunks. A browser tab that remains open across a deployment can therefore reference an asset hash that no longer exists. Vite emits `vite:preloadError` for this case.
 
-The client performs one guarded reload on that event so the browser receives the current asset manifest. A sessionStorage timestamp prevents reload loops if the failure is caused by something other than version skew. Cloudflare Workers Static Assets already serves cacheable assets with immediate revalidation by default.
+The client performs one guarded reload on that event so the browser receives the current asset manifest. A sessionStorage timestamp prevents reload loops if the failure is caused by something other than version skew.
 
 ## First production activation
 
 1. configure `ANTHROPIC_API_KEY` directly in Cloudflare as a secret;
-2. merge/deploy M2d; Wrangler rejects the deployment if the required Anthropic secret is absent;
-3. open the protected app as any user permitted by the Cloudflare Access policy;
-4. confirm the document action becomes enabled;
-5. run one synthetic document end-to-end;
-6. inspect Cloudflare logs/observability for metadata only — no case text, prompts, or model response payloads;
-7. only then use real case material.
+2. configure `TEAM_DOMAIN` and `POLICY_AUD` in Wrangler from the existing Access application metadata;
+3. merge/deploy; Wrangler rejects the deployment if the required Anthropic secret is absent;
+4. open the protected app as any user permitted by the Cloudflare Access policy;
+5. confirm the document action becomes enabled;
+6. run one synthetic document end-to-end;
+7. inspect Cloudflare logs/observability for metadata only — no case text, prompts, or model response payloads;
+8. only then use real case material.
