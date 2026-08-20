@@ -1,6 +1,6 @@
 .area-tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
   margin: -10px 0 24px;
   padding: 5px;
@@ -9,13 +9,17 @@
   background: #eef2ef;
 }
 .area-tabs button {
+  min-width: 0;
   min-height: 42px;
+  padding: 0 8px;
   border: 0;
   border-radius: 10px;
   background: transparent;
   color: #5d6c66;
   cursor: pointer;
+  font-size: 14px;
   font-weight: 800;
+  white-space: nowrap;
 }
 .area-tabs button.active {
   background: white;
@@ -100,6 +104,13 @@
 .deadline-card { border-left: 4px solid #8d6f3e; }
 .locked-analysis-card { background: #f5f6f5; color: #5b6661; }
 .locked-analysis-card .primary-button { margin-top: 14px; }
+
+@media (max-width: 380px) {
+  .area-tabs button {
+    padding: 0 5px;
+    font-size: 13px;
+  }
+}
 
 @media (min-width: 680px) {
   .document-stack { gap: 14px; }
