@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { SYNTHETIC_CASE_SNAPSHOT } from '../demo/synthetic-case-state';
 import type { CurrentStateEntry } from '../domain/current-state';
+import './current-case.css';
 
 const stateLabel: Record<CurrentStateEntry['status'], string> = {
   confirmed: 'Bekræftet',
