@@ -7,6 +7,7 @@ import { evaluateDocumentAnalysisGate } from './document-analysis-service';
 import { createAnthropicMessageAnalysisProvider, type MessageAnalysisProvider } from './anthropic-message-provider';
 
 const MessageRequestSchema = z.object({ message: z.string().trim().min(1).max(20_000) });
+const MAX_MESSAGE_REQUEST_CHARACTERS = 25_000;
 export type MessageProviderFactory = (apiKey: string) => MessageAnalysisProvider;
 
 function json(body: unknown, status = 200): Response {
@@ -64,9 +65,12 @@ export async function handleMessageAnalysisRequest(
   const evaluation = evaluateDocumentAnalysisGate(buildRuntimeGate(env, authenticated));
   if (!evaluation.allowed) return json({ error: 'analysis_unavailable' }, 503);
 
+  const rawBody = await request.text();
+  if (rawBody.length > MAX_MESSAGE_REQUEST_CHARACTERS) return json({ error: 'request_too_large' }, 413);
+
   let raw: unknown;
   try {
-    raw = JSON.parse(await request.text());
+    raw = JSON.parse(rawBody);
   } catch {
     return json({ error: 'invalid_json' }, 400);
   }
