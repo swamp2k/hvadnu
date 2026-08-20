@@ -45,16 +45,20 @@ export function buildRuntimeGate(env: WorkerEnv, authenticated: boolean): Docume
   };
 }
 
-export function isAuthorizedAccessRequest(request: Request, env: WorkerEnv): boolean {
+export function isAuthorizedAccessIdentity(authenticatedEmail: string | null | undefined, env: WorkerEnv): boolean {
   const allowed = env.ALLOWED_EMAIL?.trim().toLowerCase();
-  const authenticatedEmail = request.headers.get('cf-access-authenticated-user-email')?.trim().toLowerCase();
-  return Boolean(allowed && authenticatedEmail && allowed === authenticatedEmail);
+  const authenticated = authenticatedEmail?.trim().toLowerCase();
+  return Boolean(allowed && authenticated && allowed === authenticated);
 }
 
-export function handleDocumentAnalysisStatusRequest(request: Request, env: WorkerEnv): Response {
+export function handleDocumentAnalysisStatusRequest(
+  request: Request,
+  env: WorkerEnv,
+  authenticatedEmail: string | null | undefined,
+): Response {
   if (request.method !== 'GET') return json({ error: 'method_not_allowed' }, 405);
 
-  const authenticated = isAuthorizedAccessRequest(request, env);
+  const authenticated = isAuthorizedAccessIdentity(authenticatedEmail, env);
   if (!authenticated) return json({ available: false }, 401);
 
   const gate = buildRuntimeGate(env, authenticated);
@@ -65,11 +69,12 @@ export function handleDocumentAnalysisStatusRequest(request: Request, env: Worke
 export async function handleDocumentAnalysisRequest(
   request: Request,
   env: WorkerEnv,
+  authenticatedEmail: string | null | undefined,
   providerFactory: ProviderFactory = createAnthropicDocumentAnalysisProvider,
 ): Promise<Response> {
   if (request.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
 
-  const authenticated = isAuthorizedAccessRequest(request, env);
+  const authenticated = isAuthorizedAccessIdentity(authenticatedEmail, env);
   if (!authenticated) return json({ error: 'unauthorized' }, 401);
 
   const gate = buildRuntimeGate(env, authenticated);
